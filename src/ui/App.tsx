@@ -17,7 +17,7 @@ import {
   useStore,
   useToast,
 } from "./hooks";
-import { exportFlow } from "./share";
+import { doExportWithToast } from "./share";
 import { isIOS, isStandalone, subscribeUpdate } from "./sw-client";
 import { InventoryView } from "./views/InventoryView";
 import { CreateSheet, ItemView } from "./views/ItemView";
@@ -76,11 +76,6 @@ function Shell() {
   const nag = exportNag(doc, nowIso);
   const toBuyCount = shoppingList(doc, nowIso).toBuy.length;
 
-  async function doExport(): Promise<void> {
-    const result = await exportFlow(store);
-    if (result !== "cancelled") toast("Backup exported");
-  }
-
   const openItem =
     nav.openItemId !== null ? doc.items.find((i) => i.id === nav.openItemId) : undefined;
 
@@ -89,6 +84,20 @@ function Shell() {
   return (
     <div class="app">
       <div class="banners">
+        {/* Storage banners read the store directly each render — the store
+            notifies subscribers when either flag flips, and useDoc() above
+            already re-renders this component on every notify. */}
+        {store.storageConflict() && (
+          <Banner kind="warn" action="Reload" onAction={() => location.reload()}>
+            This pantry was changed in another tab — reload to continue.
+          </Banner>
+        )}
+        {store.saveError() && (
+          <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
+            <strong>Storage full — changes are NOT being saved.</strong> Export a backup now,
+            then free space by deleting old snapshots in More → Housekeeping.
+          </Banner>
+        )}
         {applyUpdate !== null && (
           <Banner kind="info" action="Restart" onAction={applyUpdate}>
             Update ready.
@@ -103,7 +112,7 @@ function Shell() {
           </Banner>
         )}
         {nag === "banner" && (
-          <Banner kind="warn" action="Export" onAction={() => void doExport()}>
+          <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
             Your backup is stale — everything entered since the last export is unprotected.
           </Banner>
         )}
