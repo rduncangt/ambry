@@ -1,0 +1,59 @@
+/* SettingsView-specific layout. Reuses the global primitives (.btn,
+   .field-input, .row-title/.row-sub); everything new is settings- prefixed
+   so concurrent sibling views can't collide in the global cascade. */
+
+.settings-section { margin-bottom: var(--s5); }
+.settings-h {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: var(--s2);
+}
+.settings-stack { display: flex; flex-direction: column; gap: var(--s3); }
+.settings-note { font-size: 14px; color: var(--muted); }
+.settings-error { font-size: 14px; font-weight: 600; color: var(--danger); }
+
+.settings-field { display: block; }
+.settings-field-label {
+  display: block;
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: var(--s1);
+}
+
+/* label/value line (backup status, snapshots, about) */
+.settings-kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s3);
+  min-height: 28px;
+  font-size: 15px;
+}
+.settings-kv-label { color: var(--muted); }
+
+/* import preview card + the loud older-than-local warning (PLAN.md §1.3) */
+.settings-import-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.settings-import-stale {
+  border: 2px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger);
+  padding: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  font-size: 14px;
+}
+/* the disabled state exists only here (stale import awaiting typed confirm) */
+.settings-import-card .btn:disabled { opacity: 0.45; }
