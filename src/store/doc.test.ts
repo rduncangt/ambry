@@ -147,6 +147,42 @@ describe("loadDoc — older schema", () => {
   });
 });
 
+describe("loadDoc — quota throws degrade instead of crashing the boot", () => {
+  /** Adapter whose every set() throws, as a full localStorage would. */
+  function quotaAdapter(initial: Record<string, string>) {
+    const inner = memoryAdapter(initial);
+    return {
+      ...inner,
+      set(): never {
+        throw new Error("QuotaExceededError");
+      },
+    };
+  }
+
+  it("migration still returns the migrated doc when the snapshot/save writes throw", () => {
+    const from = SCHEMA_VERSION - 1;
+    MIGRATIONS[from] = (rawDoc) => ({ ...rawDoc, migrated_marker: true });
+    const raw = JSON.stringify({ ...makeDoc(), schema_version: from });
+    const adapter = quotaAdapter({ [DOC_KEY]: raw });
+
+    const r = loadDoc(adapter);
+    expect(r.status).toBe("migrated");
+    expect(r.doc.schema_version).toBe(SCHEMA_VERSION);
+    expect((r.doc as unknown as Record<string, unknown>).migrated_marker).toBe(true);
+    // Nothing could be written, so the original bytes still sit at DOC_KEY.
+    expect(adapter.get(DOC_KEY)).toBe(raw);
+  });
+
+  it("a failed corrupt-stash still returns 'corrupt' with the bytes preserved", () => {
+    const raw = "{broken";
+    const adapter = quotaAdapter({ [DOC_KEY]: raw });
+    const r = loadDoc(adapter);
+    expect(r.status).toBe("corrupt");
+    expect(r.doc).toEqual(emptyDoc());
+    expect(adapter.get(DOC_KEY)).toBe(raw);
+  });
+});
+
 describe("loadDoc — current schema", () => {
   it("loads without writing any snapshot or touching the stored bytes", () => {
     const doc = makeDoc({ items: [makeItem()] });

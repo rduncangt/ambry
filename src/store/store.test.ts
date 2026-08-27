@@ -532,6 +532,80 @@ describe("undoQuantity + lastQuantityWrite", () => {
     store.undoQuantity(item.id, 0.5); // 3 -> 0.5 crosses the threshold
     expect(item.flagged).toBe(true);
   });
+
+  it("restoreFlags puts back a manual flag the undone purchase cleared", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "butter", quantity: 1 });
+    clock.advance(1000);
+    store.flagManual(item.id);
+    const flaggedAt = item.flagged_at;
+    // The caller captures the triple BEFORE its write, exactly as the UI does.
+    const flagsBefore = {
+      flagged: item.flagged,
+      flag_source: item.flag_source,
+      flagged_at: item.flagged_at,
+    };
+    clock.advance(1000);
+    store.purchase(item.id); // purchase ALWAYS clears — including manual flags
+    expect(item.flagged).toBe(false);
+    const undo = store.lastQuantityWrite();
+    clock.advance(1000);
+    store.undoQuantity(undo!.itemId, undo!.qtyBefore, flagsBefore);
+    expect(item.quantity).toBe(1);
+    // The manual flag is back with its ORIGINAL provenance and timestamp, so
+    // the shopping list's oldest-first order does not reshuffle.
+    expect(item.flagged).toBe(true);
+    expect(item.flag_source).toBe("manual");
+    expect(item.flagged_at).toBe(flaggedAt);
+  });
+
+  it("restoreFlags puts back a threshold flag a boundary purchase cleared", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "eggs", quantity: 3, threshold: 2 });
+    clock.advance(1000);
+    store.adjustQuantity(item.id, -2); // 3 -> 1 crosses: threshold raise
+    expect(item.flag_source).toBe("threshold");
+    const raisedAt = item.flagged_at;
+    const flagsBefore = {
+      flagged: item.flagged,
+      flag_source: item.flag_source,
+      flagged_at: item.flagged_at,
+    };
+    clock.advance(1000);
+    store.purchase(item.id, 1); // 1 -> 2: ends AT the threshold, still clears
+    expect(item.flagged).toBe(false);
+    const undo = store.lastQuantityWrite();
+    clock.advance(1000);
+    // The compensating 2 -> 1 recount is NOT a fresh crossing (before must be
+    // strictly above the threshold), so only restoreFlags can re-raise here.
+    store.undoQuantity(undo!.itemId, undo!.qtyBefore, flagsBefore);
+    expect(item.quantity).toBe(1);
+    expect(item.flagged).toBe(true);
+    expect(item.flag_source).toBe("threshold");
+    expect(item.flagged_at).toBe(raisedAt);
+  });
+
+  it("restoreFlags clears a flag the undone write itself raised", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "milk", quantity: 3, threshold: 1 });
+    const flagsBefore = {
+      flagged: item.flagged,
+      flag_source: item.flag_source,
+      flagged_at: item.flagged_at,
+    };
+    clock.advance(1000);
+    store.adjustQuantity(item.id, -2.5); // 3 -> 0.5 crosses: raise
+    expect(item.flagged).toBe(true);
+    const undo = store.lastQuantityWrite();
+    clock.advance(1000);
+    // The compensating 0.5 -> 3 recount is upward, and the sticky rule says
+    // recount-up never clears — restoreFlags must override it in-commit.
+    store.undoQuantity(undo!.itemId, undo!.qtyBefore, flagsBefore);
+    expect(item.quantity).toBe(3);
+    expect(item.flagged).toBe(false);
+    expect(item.flag_source).toBeNull();
+    expect(item.flagged_at).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -647,6 +721,46 @@ describe("resizePackage", () => {
   });
 });
 
+describe("clearPackageSize", () => {
+  it("nulls the package, leaves quantity/threshold, records a noted unit_change", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({
+      name: "flour",
+      unit: "bag",
+      quantity: 2,
+      threshold: 1,
+      package_size: { amount: 1000, unit: "g" },
+    });
+    clock.advance(5000);
+    store.clearPackageSize(item.id);
+    expect(item.package_size).toBeNull();
+    // The numbers do not move — only the bag<->contents bookkeeping went away.
+    expect(item.quantity).toBe(2);
+    expect(item.threshold).toBe(1);
+    expect(item.updated_at).toBe("2026-08-27T12:00:05.000Z");
+    const e = lastEvent(store);
+    expect(e).toMatchObject({
+      item_id: item.id,
+      kind: "unit_change",
+      qty_before: 2,
+      qty_after: 2,
+      unit: "bag",
+      note: "package 1000 g -> none",
+    });
+    // The unit string itself did not change, so no unit_before.
+    expect(e.unit_before).toBeUndefined();
+    expect(store.getDoc().settings.writes_since_export).toBe(2);
+  });
+
+  it("is a no-op when there is no package (no 'none -> none' event)", () => {
+    const { store } = fresh();
+    const item = store.createItem({ name: "salt" });
+    store.clearPackageSize(item.id);
+    expect(store.getDoc().events.map((e) => e.kind)).toEqual(["create"]);
+    expect(store.getDoc().settings.writes_since_export).toBe(1);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Merge
 // ---------------------------------------------------------------------------
@@ -725,6 +839,33 @@ describe("softDelete / restore", () => {
     store.restore(item.id);
     expect(item.deleted_at).toBeNull();
     expect(lastEvent(store)).toMatchObject({ kind: "restore", qty_before: 2, qty_after: 2 });
+  });
+
+  it("restore clears merged_into so a restored merge-loser owns its history again", () => {
+    const { store, clock } = fresh();
+    const survivor = store.createItem({ name: "paprika", unit: "jar", quantity: 1 });
+    const loser = store.createItem({ name: "Smoked Paprika", unit: "jar", quantity: 1 });
+    clock.advance(5000);
+    store.mergeItems(survivor.id, loser.id, 2);
+    expect(loser.merged_into).toBe(survivor.id);
+
+    clock.advance(5000);
+    store.restore(loser.id);
+    expect(loser.deleted_at).toBeNull();
+    // Without this, the restored item's events — past AND future — keep
+    // resolving through the stale pointer to the merge survivor.
+    expect(loser.merged_into).toBeNull();
+    const loserCreate = store.getDoc().events.find(
+      (e) => e.item_id === loser.id && e.kind === "create",
+    );
+    expect(loserCreate).toBeDefined();
+    expect(historyFor(store.getDoc(), loser.id).some((e) => e.id === loserCreate!.id)).toBe(true);
+
+    // A later reverse merge must not weld the pair into a pointer cycle.
+    clock.advance(5000);
+    store.mergeItems(loser.id, survivor.id, 2);
+    expect(survivor.merged_into).toBe(loser.id);
+    expect(loser.merged_into).toBeNull();
   });
 
   it("double delete / double restore are idempotent no-ops", () => {
@@ -848,6 +989,219 @@ describe("export / import round-trip", () => {
     const c = createStore(b.adapter, { now: makeClock().now, uuid: makeUuid() });
     expect(c.bootStatus()).toBe("loaded");
     expect(c.getDoc()).toEqual(a.store.getDoc());
+  });
+});
+
+describe("importReplace failure atomicity", () => {
+  /** Adapter whose set() throws (like a quota error) when failWhen matches. */
+  function failingSet(inner: StorageAdapter, failWhen: (key: string) => boolean): StorageAdapter {
+    return {
+      ...inner,
+      set(k, v) {
+        if (failWhen(k)) throw new Error("QuotaExceededError");
+        inner.set(k, v);
+      },
+    };
+  }
+
+  it("a doc-save throw leaves memory AND storage on the old doc — no divergence", () => {
+    // Seed real bytes so the store under test boots 'loaded'.
+    const seeded = fresh();
+    seeded.store.createItem({ name: "old doc item" });
+    seeded.store.flush();
+
+    let fail = false;
+    const adapter = failingSet(seeded.adapter, (k) => fail && k === DOC_KEY);
+    const store = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    const rawBefore = adapter.get(DOC_KEY);
+    const docBefore = store.getDoc();
+
+    fail = true;
+    const outcome = store.importReplace(emptyDoc("other-device"));
+    expect(outcome.ok).toBe(false);
+    // The in-memory doc is UNTOUCHED: the app is not silently running on an
+    // import that never landed on disk.
+    expect(store.getDoc()).toBe(docBefore);
+    expect(store.getDoc().items.map((i) => i.name)).toEqual(["old doc item"]);
+    expect(adapter.get(DOC_KEY)).toBe(rawBefore);
+
+    // And the next save persists the OLD lineage, not the failed import.
+    fail = false;
+    store.adjustQuantity(store.getDoc().items[0]!.id, 1);
+    store.flush();
+    const persisted = JSON.parse(adapter.get(DOC_KEY)!) as AmbryDoc;
+    expect(persisted.items[0]!.name).toBe("old doc item");
+    expect(persisted.settings.device_label).not.toBe("other-device");
+  });
+
+  it("a pre-import snapshot throw also fails the import cleanly", () => {
+    const seeded = fresh();
+    seeded.store.createItem({ name: "old doc item" });
+    seeded.store.flush();
+
+    const adapter = failingSet(seeded.adapter, (k) => k.startsWith(SNAPSHOT_PREFIX));
+    const store = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    const rawBefore = adapter.get(DOC_KEY);
+
+    const outcome = store.importReplace(emptyDoc("other-device"));
+    expect(outcome.ok).toBe(false);
+    expect(store.getDoc().items.map((i) => i.name)).toEqual(["old doc item"]);
+    expect(adapter.get(DOC_KEY)).toBe(rawBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quota-safe persistence + cross-context clobber guard
+// ---------------------------------------------------------------------------
+
+describe("quota-safe persistence (saveError)", () => {
+  function togglingAdapter(): { adapter: StorageAdapter; setFail: (v: boolean) => void } {
+    const inner = memoryAdapter();
+    let fail = false;
+    return {
+      setFail: (v) => (fail = v),
+      adapter: {
+        ...inner,
+        set(k, v) {
+          if (fail && k === DOC_KEY) throw new Error("QuotaExceededError");
+          inner.set(k, v);
+        },
+      },
+    };
+  }
+
+  it("a failed debounced save stays dirty, raises saveError, and recovers on flush", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { adapter, setFail } = togglingAdapter();
+    const store = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+    expect(store.saveError()).toBe(false);
+
+    setFail(true);
+    store.createItem({ name: "a" }); // notify #1 (the mutation)
+    vi.advanceTimersByTime(SAVE_DEBOUNCE_MS);
+    // The save threw: nothing landed, the failure is surfaced and announced.
+    expect(adapter.get(DOC_KEY)).toBeNull();
+    expect(store.saveError()).toBe(true);
+    expect(notifications).toBe(2);
+
+    // flush() retries because the doc stayed dirty; success clears the flag.
+    setFail(false);
+    store.flush();
+    expect(store.saveError()).toBe(false);
+    expect(notifications).toBe(3); // recovery is UI-visible too
+    expect((JSON.parse(adapter.get(DOC_KEY)!) as AmbryDoc).items).toHaveLength(1);
+  });
+
+  it("flush() itself survives a quota throw (pagehide must not crash)", () => {
+    const { adapter, setFail } = togglingAdapter();
+    const store = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    store.createItem({ name: "a" });
+    setFail(true);
+    expect(() => store.flush()).not.toThrow();
+    expect(store.saveError()).toBe(true);
+    // Still dirty: a later successful flush lands the doc unchanged.
+    setFail(false);
+    store.flush();
+    expect(store.saveError()).toBe(false);
+    expect((JSON.parse(adapter.get(DOC_KEY)!) as AmbryDoc).items).toHaveLength(1);
+  });
+});
+
+describe("cross-context clobber guard (storageConflict)", () => {
+  it("refuses to save over bytes another context wrote — permanently", () => {
+    const { adapter, store, clock } = fresh();
+    const item = store.createItem({ name: "a" });
+    store.flush();
+    expect(store.storageConflict()).toBe(false);
+
+    // Another tab writes DOC_KEY behind this store's back.
+    const foreign = JSON.stringify(emptyDoc("other-tab"));
+    adapter.set(DOC_KEY, foreign);
+
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+    clock.advance(5000);
+    store.adjustQuantity(item.id, 1); // notify #1 (the mutation)
+    store.flush(); // guard trips: notify #2, and crucially NO write
+    expect(store.storageConflict()).toBe(true);
+    expect(adapter.get(DOC_KEY)).toBe(foreign); // the other tab's data survives
+    expect(notifications).toBe(2);
+
+    // The refusal holds for the store's whole lifetime — only a reload
+    // (which re-reads storage) can re-establish a baseline.
+    store.adjustQuantity(item.id, 1);
+    store.flush();
+    expect(adapter.get(DOC_KEY)).toBe(foreign);
+    // importReplace is a persist like any other: refused too.
+    expect(store.importReplace(emptyDoc()).ok).toBe(false);
+    expect(adapter.get(DOC_KEY)).toBe(foreign);
+  });
+
+  it("an empty boot that lost a race to another tab refuses its first save", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    const foreign = JSON.stringify(emptyDoc("other-tab"));
+    adapter.set(DOC_KEY, foreign);
+    store.createItem({ name: "mine" });
+    store.flush();
+    expect(store.storageConflict()).toBe(true);
+    expect(adapter.get(DOC_KEY)).toBe(foreign);
+  });
+
+  it("a normal reload is not a conflict: the baseline comes from storage at boot", () => {
+    const { adapter, store } = fresh();
+    const item = store.createItem({ name: "a" });
+    store.flush();
+    const reloaded = createStore(adapter, { now: makeClock().now, uuid: makeUuid() });
+    reloaded.adjustQuantity(item.id, 1);
+    reloaded.flush();
+    expect(reloaded.storageConflict()).toBe(false);
+    expect((JSON.parse(adapter.get(DOC_KEY)!) as AmbryDoc).items[0]!.quantity).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snapshot access
+// ---------------------------------------------------------------------------
+
+describe("snapshot access", () => {
+  it("lists snapshots newest-first with byte sizes; reads and deletes them", () => {
+    const { adapter, store } = fresh();
+    store.createItem({ name: "a" });
+    store.flush();
+    const older = SNAPSHOT_PREFIX + "corrupt-2026-01-01T00:00:00.000Z";
+    const newer = SNAPSHOT_PREFIX + "pre-import-2026-08-01T00:00:00.000Z";
+    adapter.set(older, "junk-bytes");
+    adapter.set(newer, "{}");
+
+    const listed = store.listSnapshots();
+    // Newest first (keys embed ISO timestamps), and never the live doc.
+    expect(listed.map((s) => s.key)).toEqual([newer, older]);
+    expect(listed[0]!.bytes).toBe(2); // "{}"
+    expect(listed[1]!.bytes).toBe(10); // "junk-bytes"
+
+    expect(store.snapshotText(older)).toBe("junk-bytes");
+    expect(store.snapshotText(SNAPSHOT_PREFIX + "missing")).toBeNull();
+    // Prefix-guarded: not a general storage peephole.
+    expect(store.snapshotText(DOC_KEY)).toBeNull();
+
+    const writesBefore = store.getDoc().settings.writes_since_export;
+    const eventsBefore = store.getDoc().events.length;
+    let notifications = 0;
+    store.subscribe(() => notifications++);
+    store.deleteSnapshot(older);
+    expect(adapter.get(older)).toBeNull();
+    expect(store.listSnapshots().map((s) => s.key)).toEqual([newer]);
+    // Housekeeping, not a doc mutation: no event, meter untouched.
+    expect(store.getDoc().settings.writes_since_export).toBe(writesBefore);
+    expect(store.getDoc().events).toHaveLength(eventsBefore);
+    expect(notifications).toBe(1);
+
+    // deleteSnapshot can never remove the live doc.
+    store.deleteSnapshot(DOC_KEY);
+    expect(adapter.get(DOC_KEY)).not.toBeNull();
   });
 });
 
