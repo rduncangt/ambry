@@ -8,6 +8,7 @@
  */
 import { DEFAULT_RETENTION_DAYS, SCHEMA_VERSION, now, type AmbryDoc } from "../types";
 import { DOC_KEY, SNAPSHOT_PREFIX, type StorageAdapter } from "./adapter";
+import { migrateDoc } from "./migrations";
 
 export type BootStatus = "loaded" | "empty" | "migrated" | "corrupt";
 
@@ -41,7 +42,41 @@ export function emptyDoc(deviceLabel = "phone"): AmbryDoc {
  * - Current schema -> { doc, "loaded" }.
  */
 export function loadDoc(adapter: StorageAdapter): LoadResult {
-  throw new Error("TODO: implement (workflow)");
+  const raw = adapter.get(DOC_KEY);
+  if (raw === null) {
+    return { doc: emptyDoc(), status: "empty" };
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+
+    // Peek at the version BEFORE migrating: the pre-migrate snapshot must
+    // hold the original bytes, so a buggy migration can never be the thing
+    // that destroyed the only copy of the data.
+    const version =
+      typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).schema_version
+        : undefined;
+    const needsMigration = typeof version === "number" && version < SCHEMA_VERSION;
+    if (needsMigration) {
+      writeSnapshot(adapter, `pre-migrate-v${version}`, raw);
+    }
+
+    const doc = migrateDoc(parsed);
+    if (needsMigration) {
+      // Persist the migrated shape immediately so every later read this
+      // session — and the next boot — sees the current schema.
+      saveDoc(adapter, doc);
+      return { doc, status: "migrated" };
+    }
+    return { doc, status: "loaded" };
+  } catch {
+    // Parse OR validation failure (a newer-schema doc lands here too: the
+    // running app cannot use it either way). Stash first — the stash is the
+    // recovery path; the empty doc is only a placeholder for the boot screen.
+    writeSnapshot(adapter, "corrupt-" + now(), raw);
+    return { doc: emptyDoc(), status: "corrupt" };
+  }
 }
 
 export function saveDoc(adapter: StorageAdapter, doc: AmbryDoc): void {
