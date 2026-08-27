@@ -8,7 +8,12 @@ import { LADDER_READ, LADDER_WRITE, type LadderRung } from "../types";
 
 /** Which rung a quantity displays as. */
 export function readRung(qty: number): LadderRung {
-  throw new Error("TODO: implement (workflow)");
+  // Boundaries are inclusive on the named buckets (0.75 IS full, 0.35 IS
+  // half) so the write values 1.0/0.5 always read back as the rung tapped.
+  if (qty >= LADDER_READ.full) return "full";
+  if (qty >= LADDER_READ.half) return "half";
+  if (qty > 0) return "low";
+  return "out";
 }
 
 /** The quantity a rung tap writes. */
@@ -21,5 +26,7 @@ export function rungValue(rung: LadderRung): number {
  * values (fractions of ONE container) would destroy a multi-container count.
  */
 export function rungNeedsConfirm(qty: number): boolean {
-  throw new Error("TODO: implement (workflow)");
+  // Strictly > 1: rung values describe exactly one container, so a tap at 1
+  // is a same-scale write and needs no ceremony.
+  return qty > 1;
 }

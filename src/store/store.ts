@@ -23,13 +23,19 @@ import {
   type DisplayMode,
   type EventKind,
   type ExportEnvelope,
+  type HistoryEvent,
   type Item,
   type LadderRung,
   type ShoppingExtra,
 } from "../types";
-import type { StorageAdapter } from "./adapter";
-import type { BootStatus } from "./doc";
-import type { UnitChangePlan } from "../domain/units";
+import { SNAPSHOT_PREFIX, type StorageAdapter } from "./adapter";
+import { loadDoc, saveDoc, writeSnapshot, type BootStatus } from "./doc";
+import { flagTransition } from "../domain/flags";
+import { rungValue } from "../domain/ladder";
+import { planMerge } from "../domain/merge";
+import { pruneDoc } from "../domain/prune";
+import { buildExport as buildEnvelope } from "../domain/exportImport";
+import { planPackageResize, type UnitChangePlan } from "../domain/units";
 
 export const COALESCE_MS = 2000;
 export const SAVE_DEBOUNCE_MS = 100;
@@ -155,5 +161,478 @@ export function createStore(
   adapter: StorageAdapter,
   deps: { now?: () => string; uuid?: () => string } = {},
 ): Store {
-  throw new Error("TODO: implement (workflow)");
+  const nowFn = deps.now ?? now;
+  const uuidFn = deps.uuid ?? uuid;
+
+  const loaded = loadDoc(adapter);
+  let doc = loaded.doc;
+  const status: BootStatus = loaded.status;
+
+  const listeners = new Set<() => void>();
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Dirty tracking matters for the boot rule: an "empty" boot must never
+  // persist its placeholder doc, so flush() on pagehide with no mutations
+  // writes nothing (loadDoc deliberately did not persist it either).
+  let dirty = false;
+
+  function notify(): void {
+    // Copy first so a listener unsubscribing (or subscribing) mid-notify
+    // cannot skip or double-call anyone in this pass.
+    for (const listener of [...listeners]) listener();
+  }
+
+  function persistNow(): void {
+    if (!dirty) return;
+    saveDoc(adapter, doc);
+    dirty = false;
+  }
+
+  function flushNow(): void {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    persistNow();
+  }
+
+  function scheduleSave(): void {
+    dirty = true;
+    // Trailing debounce: each mutation restarts the window, so a burst of
+    // writes costs one setItem after it settles.
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      persistNow();
+    }, SAVE_DEBOUNCE_MS);
+  }
+
+  /** Common tail of every committed mutation. */
+  function committed(countWrite = true): void {
+    // writes_since_export is the export-nag's data-at-risk meter; pruning and
+    // export bookkeeping pass false because they are not human edits at risk.
+    if (countWrite) doc.settings.writes_since_export += 1;
+    notify();
+    scheduleSave();
+  }
+
+  function itemById(id: string): Item {
+    const item = doc.items.find((i) => i.id === id);
+    if (item === undefined) throw new Error(`Unknown item: ${id}`);
+    return item;
+  }
+
+  function extraById(id: string): ShoppingExtra {
+    const extra = doc.extras.find((x) => x.id === id);
+    if (extra === undefined) throw new Error(`Unknown extra: ${id}`);
+    return extra;
+  }
+
+  /** Kinds whose before/after are a real stock movement in ONE unit. */
+  function isGestureKind(kind: EventKind): boolean {
+    return kind === "add" || kind === "use" || kind === "recount" || kind === "purchase";
+  }
+
+  /**
+   * THE one commit path for every event-emitting mutation: roundQty, event
+   * append-or-coalesce, flag transition, verified_at option, updated_at,
+   * writes_since_export, notify, debounced save.
+   */
+  function commitQuantity(
+    item: Item,
+    after: number,
+    kind: EventKind,
+    opts: { stampVerified?: boolean; unitBefore?: string; note?: string } = {},
+  ): void {
+    const at = nowFn();
+    const before = item.quantity;
+    const rounded = roundQty(after);
+
+    // Flags are evaluated against the item's PRE-write state, and only for
+    // gesture kinds: a unit_change or merge moves the number across
+    // denominations (before in the old unit, after in the new), so the
+    // crossing test would compare incommensurable values and could raise a
+    // flag for a pure re-labeling. create can never cross (before is 0), and
+    // delete/restore keep before === after.
+    const transition = isGestureKind(kind) ? flagTransition(item, before, rounded, kind) : "none";
+
+    // Append-or-coalesce. Only the doc's very last event is a candidate:
+    // any intervening event (other item, other kind) ends the burst.
+    const last = doc.events[doc.events.length - 1];
+    const coalescible = kind === "add" || kind === "use";
+    if (
+      coalescible &&
+      last !== undefined &&
+      last.item_id === item.id &&
+      last.kind === kind &&
+      Date.parse(at) - Date.parse(last.at) <= COALESCE_MS
+    ) {
+      // In-place update: qty_before stays the burst's origin, so the settled
+      // event describes the whole burst (and undo returns to the pre-burst
+      // value). Safe under R2 — nothing references events.
+      last.qty_after = rounded;
+      last.at = at;
+    } else {
+      const event: HistoryEvent = {
+        id: uuidFn(),
+        item_id: item.id,
+        at,
+        kind,
+        qty_before: before,
+        qty_after: rounded,
+        // Snapshot of item.unit at write time; unit-change callers set
+        // item.unit to the NEW unit before committing, so qty_after's
+        // denomination is what lands here and qty_before's in unit_before.
+        unit: item.unit,
+      };
+      if (opts.unitBefore !== undefined) event.unit_before = opts.unitBefore;
+      if (opts.note !== undefined) event.note = opts.note;
+      doc.events.push(event);
+    }
+
+    item.quantity = rounded;
+    if (transition === "raise") {
+      item.flagged = true;
+      item.flag_source = "threshold";
+      item.flagged_at = at;
+    } else if (transition === "clear") {
+      item.flagged = false;
+      item.flag_source = null;
+      item.flagged_at = null;
+    }
+    // recount-family only, and NOT the undo compensator: the caller decides.
+    if (opts.stampVerified === true) item.verified_at = at;
+    item.updated_at = at;
+    committed();
+  }
+
+  return {
+    // -- reading ------------------------------------------------------------
+    getDoc: () => doc,
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+
+    bootStatus: () => status,
+
+    lastQuantityWrite() {
+      // Pure scan over the log, newest first — no extra state to persist or
+      // to fall out of sync (the 5 s window itself is UI-owned toast state).
+      for (let i = doc.events.length - 1; i >= 0; i--) {
+        const e = doc.events[i];
+        if (e === undefined) continue;
+        if (isGestureKind(e.kind)) return { itemId: e.item_id, qtyBefore: e.qty_before };
+      }
+      return null;
+    },
+
+    // -- item lifecycle -----------------------------------------------------
+    createItem(input) {
+      const at = nowFn();
+      const display_mode = input.display_mode ?? "number";
+      let threshold = input.threshold ?? null;
+      // Ladder items need a threshold for "Low" (0.2) to cross — same rule
+      // editItem applies when switching modes later.
+      if (display_mode === "ladder" && threshold === null) threshold = LADDER_DEFAULT_THRESHOLD;
+
+      const item: Item = {
+        id: uuidFn(),
+        name: input.name,
+        aliases: [],
+        notes: input.notes ?? "",
+        category: input.category ?? null,
+        location: input.location ?? null,
+        unit: input.unit ?? "count",
+        // 0 here so the create event records 0 -> initial stock; the commit
+        // path below writes the real starting quantity.
+        quantity: 0,
+        package_size: input.package_size ?? null,
+        display_mode,
+        threshold,
+        flagged: false,
+        flag_source: null,
+        flagged_at: null,
+        restock_amount: input.restock_amount ?? 1,
+        never_prompt: false,
+        expiry: input.expiry ?? null,
+        barcodes: [],
+        verified_at: null,
+        merged_into: null,
+        created_at: at,
+        updated_at: at,
+        deleted_at: null,
+      };
+      doc.items.push(item);
+      commitQuantity(item, input.quantity ?? 1, "create");
+      return item;
+    },
+
+    editItem(id, fields) {
+      const item = itemById(id);
+      if (fields.name !== undefined) item.name = fields.name;
+      if (fields.aliases !== undefined) item.aliases = fields.aliases;
+      if (fields.notes !== undefined) item.notes = fields.notes;
+      if (fields.category !== undefined) item.category = fields.category;
+      if (fields.location !== undefined) item.location = fields.location;
+      if (fields.display_mode !== undefined) item.display_mode = fields.display_mode;
+      if (fields.threshold !== undefined) item.threshold = fields.threshold;
+      if (fields.restock_amount !== undefined) item.restock_amount = fields.restock_amount;
+      if (fields.never_prompt !== undefined) item.never_prompt = fields.never_prompt;
+      if (fields.expiry !== undefined) item.expiry = fields.expiry;
+      if (fields.barcodes !== undefined) item.barcodes = fields.barcodes;
+      // Same rule as createItem: entering ladder mode without a threshold
+      // gets the default, so "Low" always has something to cross. (An edit
+      // that explicitly supplies a threshold alongside the switch keeps it —
+      // the threshold assignment above ran first.)
+      if (fields.display_mode === "ladder" && item.threshold === null) {
+        item.threshold = LADDER_DEFAULT_THRESHOLD;
+      }
+      item.updated_at = nowFn();
+      committed();
+    },
+
+    softDelete(id) {
+      const item = itemById(id);
+      // Idempotent: a second tap must not mint a second tombstone event.
+      if (item.deleted_at !== null) return;
+      item.deleted_at = nowFn();
+      commitQuantity(item, item.quantity, "delete");
+    },
+
+    restore(id) {
+      const item = itemById(id);
+      if (item.deleted_at === null) return;
+      item.deleted_at = null;
+      commitQuantity(item, item.quantity, "restore");
+    },
+
+    // -- quantity -----------------------------------------------------------
+    adjustQuantity(id, delta) {
+      if (delta === 0) return; // a zero step is not an observation
+      const item = itemById(id);
+      commitQuantity(item, item.quantity + delta, delta > 0 ? "add" : "use");
+    },
+
+    setQuantity(id, qty) {
+      const item = itemById(id);
+      commitQuantity(item, qty, "recount", { stampVerified: true });
+    },
+
+    setLadderRung(id, rung) {
+      const item = itemById(id);
+      commitQuantity(item, rungValue(rung), "recount", { stampVerified: true });
+    },
+
+    purchase(id, amount) {
+      const item = itemById(id);
+      commitQuantity(item, item.quantity + (amount ?? item.restock_amount), "purchase");
+    },
+
+    undoQuantity(itemId, qtyBefore) {
+      const item = itemById(itemId);
+      // Compensating recount, NOT a human observation: no verified_at stamp
+      // (the human confirmed nothing — they retracted a tap).
+      commitQuantity(item, qtyBefore, "recount");
+    },
+
+    // -- flags --------------------------------------------------------------
+    flagManual(id) {
+      const item = itemById(id);
+      // Already-flagged: keep the original provenance and flagged_at so the
+      // shopping list's oldest-first order does not reshuffle.
+      if (item.flagged) return;
+      const at = nowFn();
+      item.flagged = true;
+      item.flag_source = "manual";
+      item.flagged_at = at;
+      item.updated_at = at;
+      committed();
+    },
+
+    clearFlag(id) {
+      const item = itemById(id);
+      if (!item.flagged) return;
+      item.flagged = false;
+      item.flag_source = null;
+      item.flagged_at = null;
+      item.updated_at = nowFn();
+      committed();
+    },
+
+    setNeverPrompt(id, value) {
+      const item = itemById(id);
+      if (item.never_prompt === value) return;
+      // Suppresses future auto-raise ONLY — an existing flag stays up.
+      item.never_prompt = value;
+      item.updated_at = nowFn();
+      committed();
+    },
+
+    verify(id) {
+      const item = itemById(id);
+      const at = nowFn();
+      // "✓ looks right" is a stamp-only observation: NO event (PLAN.md §2
+      // Reconciliation), but it is still a committed mutation.
+      item.verified_at = at;
+      item.updated_at = at;
+      committed();
+    },
+
+    // -- guarded unit flows -------------------------------------------------
+    changeUnit(id, newUnit, plan, reentered) {
+      const item = itemById(id);
+      const unitBefore = item.unit;
+
+      let quantity: number;
+      if (plan.kind === "convert") {
+        quantity = plan.quantity;
+        // Quantity AND threshold move together — never one without the other
+        // (§1.5). roundQty on the threshold kills conversion float noise the
+        // same way the commit path does for quantity.
+        item.threshold = plan.threshold === null ? null : roundQty(plan.threshold);
+        item.package_size = plan.package_size;
+      } else {
+        if (reentered === undefined) {
+          throw new Error("Unit change with no conversion path requires re-entered values");
+        }
+        quantity = reentered.quantity;
+        item.threshold = reentered.threshold === null ? null : roundQty(reentered.threshold);
+        item.package_size = reentered.package_size;
+      }
+
+      // New unit goes on the item FIRST so the event's `unit` snapshot is the
+      // one qty_after is denominated in; qty_before keeps unit_before.
+      item.unit = newUnit;
+      commitQuantity(item, quantity, "unit_change", { unitBefore });
+    },
+
+    resizePackage(id, newPackage, keep) {
+      const item = itemById(id);
+      const before = item.package_size;
+      // Domain planning: keep-amount rescales quantity+threshold through the
+      // package ratio; keep-count leaves the numbers (their physical meaning
+      // changes). Both come from the pure planner.
+      const plan = planPackageResize(item, newPackage, keep);
+      const beforeText = before === null ? "none" : `${before.amount} ${before.unit}`;
+      const note = `package ${beforeText} -> ${newPackage.amount} ${newPackage.unit} (keep ${keep})`;
+      item.package_size = { ...newPackage };
+      item.threshold = plan.threshold === null ? null : roundQty(plan.threshold);
+      // The unit string is unchanged (only its physical meaning moved), so no
+      // unit_before on the event — the note carries the package change.
+      commitQuantity(item, plan.quantity, "unit_change", { note });
+    },
+
+    // -- merge --------------------------------------------------------------
+    mergeItems(survivorId, loserId, resolvedQty) {
+      const survivor = itemById(survivorId);
+      const loser = itemById(loserId);
+      const plan = planMerge(survivor, loser); // throws on survivor === loser
+      const at = nowFn();
+
+      survivor.aliases = plan.aliases;
+      if (plan.flagged && !survivor.flagged) {
+        // The flag ORs across the pair; when the loser is the flagged half,
+        // its provenance rides along (fall back to "manual"/now for a
+        // hand-built doc missing them).
+        survivor.flagged = true;
+        survivor.flag_source = loser.flag_source ?? "manual";
+        survivor.flagged_at = loser.flagged_at ?? at;
+      }
+
+      // Loser: tombstone + pointer. Its events are NEVER rewritten — history
+      // views union over the merged_into chain (domain/merge.historyFor).
+      loser.deleted_at = at;
+      loser.merged_into = survivor.id;
+      loser.updated_at = at;
+
+      // One merge event, on the survivor, note = loser's name.
+      commitQuantity(survivor, resolvedQty, "merge", { note: loser.name });
+    },
+
+    // -- shopping extras ----------------------------------------------------
+    addExtra(text) {
+      const at = nowFn();
+      const extra: ShoppingExtra = {
+        id: uuidFn(),
+        text,
+        created_at: at,
+        updated_at: at,
+        deleted_at: null,
+      };
+      doc.extras.push(extra);
+      committed();
+      return extra;
+    },
+
+    checkExtra(id) {
+      const extra = extraById(id);
+      if (extra.deleted_at !== null) return;
+      const at = nowFn();
+      extra.deleted_at = at;
+      extra.updated_at = at;
+      committed();
+    },
+
+    uncheckExtra(id) {
+      const extra = extraById(id);
+      if (extra.deleted_at === null) return;
+      const at = nowFn();
+      extra.deleted_at = null;
+      extra.updated_at = at;
+      committed();
+    },
+
+    // -- backup / lifecycle -------------------------------------------------
+    buildExport() {
+      // Read-only: only a COMPLETED share marks the doc exported, so an
+      // abandoned share sheet cannot silently reset the nag.
+      return buildEnvelope(doc, nowFn());
+    },
+
+    recordExport() {
+      doc.settings.last_export_at = nowFn();
+      doc.settings.writes_since_export = 0;
+      committed(false);
+    },
+
+    importReplace(newDoc) {
+      try {
+        const at = nowFn();
+        const reason = `pre-import-${at}`;
+        // Snapshot the IN-MEMORY doc (it may be ahead of storage inside the
+        // debounce window) — the import gate's promised escape hatch.
+        writeSnapshot(adapter, reason, JSON.stringify(doc));
+        doc = newDoc;
+        dirty = true;
+        // Replace persists immediately: a wholesale swap must not sit in a
+        // 100 ms window where a page kill leaves the OLD doc on disk under
+        // the user's belief they restored.
+        flushNow();
+        notify();
+        return { ok: true, snapshotKey: SNAPSHOT_PREFIX + reason };
+      } catch {
+        // Snapshot or save failed (e.g. quota): the current doc stands.
+        return { ok: false };
+      }
+    },
+
+    prune() {
+      const result = pruneDoc(doc, nowFn());
+      // Same-reference result means nothing was pruned: no notify, no save.
+      if (result.doc === doc) return;
+      doc = result.doc;
+      // Housekeeping, not a human edit: writes_since_export must not move
+      // ("stored, not derived — pruning can't distort it").
+      committed(false);
+    },
+
+    flush: flushNow,
+
+    updateSettings(fields) {
+      if (fields.retention_days !== undefined) doc.settings.retention_days = fields.retention_days;
+      if (fields.device_label !== undefined) doc.settings.device_label = fields.device_label;
+      committed();
+    },
+  };
 }
