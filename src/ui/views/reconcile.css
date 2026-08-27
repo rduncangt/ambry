@@ -1,0 +1,143 @@
+/* Reconcile view — walk-the-shelf audit. View-specific rules only; all
+   primitives (.btn, .row-*, .chip, tokens) come from styles.css. */
+
+/* -- location picker: full-width tappable rows ----------------------------- */
+.recon-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  width: 100%;
+  min-height: 56px;
+  padding: var(--s2) 0;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  color: var(--ink);
+}
+.recon-pick .row-title,
+.recon-pick .row-sub {
+  display: block;
+}
+.recon-chevron {
+  color: var(--muted);
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+/* -- walk header: location title + switch-back-to-picker ------------------- */
+.recon-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+.recon-head .view-title {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.recon-switch {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  min-height: var(--tap);
+  flex-shrink: 0;
+}
+
+.recon-progress {
+  color: var(--muted);
+  font-size: 14px;
+  margin: var(--s1) 0 var(--s3);
+}
+
+/* -- walk / sweep rows ------------------------------------------------------ */
+.recon-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.recon-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line);
+}
+/* verified/edited rows dim (they also sink below the pending ones) */
+.recon-touched {
+  opacity: 0.45;
+}
+.recon-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.recon-row-head .row-title {
+  min-width: 0;
+}
+.recon-row-head .row-sub {
+  flex-shrink: 0;
+}
+.recon-row-acts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+.recon-ok {
+  border-color: var(--ok);
+  color: var(--ok);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.recon-finish {
+  margin-top: var(--s4);
+}
+
+/* -- not-seen decisions ------------------------------------------------------ */
+.recon-sweep-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.recon-delete {
+  color: var(--danger);
+}
+.recon-move {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.recon-move-new {
+  display: flex;
+  gap: var(--s2);
+}
+.recon-move-new .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* -- done screen ------------------------------------------------------------ */
+.recon-done {
+  text-align: center;
+  padding-top: var(--s5);
+}
+.recon-done-mark {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--s4);
+  border-radius: 50%;
+  background: var(--ok);
+  color: #fff;
+  font-size: 32px;
+  line-height: 64px;
+}
+.recon-done-acts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-top: var(--s5);
+}
