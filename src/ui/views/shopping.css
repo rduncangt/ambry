@@ -1,0 +1,78 @@
+/* Shopping view (ShoppingView.tsx). Reuses the .row/.row-* primitives from
+   styles.css; these rules add only the check-off targets and section chrome. */
+
+/* -- sections -------------------------------------------------------------- */
+.shop-section { margin-top: var(--s4); }
+.shop-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: var(--s1);
+}
+.shop-empty { color: var(--muted); padding: var(--s3) 0; }
+
+/* -- the ONE BIG check-off target ------------------------------------------
+   Oversized on purpose: flow (b) is 20 check-offs mid-aisle, one-handed. */
+.shop-check {
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ok);
+  font-size: 24px;
+  line-height: 1;
+}
+.shop-check:active { background: var(--accent-soft); }
+
+/* -- secondary action line under the row text ------------------------------
+   Small text but full 44px tap height; negative top margin keeps the row
+   from ballooning past one comfortable thumb-stop. */
+.shop-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: calc(-1 * var(--s1)) 0 calc(-1 * var(--s1)) calc(-1 * var(--s2));
+}
+.shop-amt {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 0 var(--s2);
+}
+.shop-quiet {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  min-height: var(--tap);
+  padding: 0 var(--s2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* -- in-cart rows are confirmations, not controls -------------------------- */
+.shop-cart-row { opacity: 0.55; }
+.shop-cart-mark { color: var(--ok); font-size: 20px; padding: 0 var(--s3); }
+
+/* -- one-shot promote prompt (PLAN.md §1.6) -------------------------------- */
+.shop-prompt {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  margin: var(--s2) 0;
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.shop-prompt-text { flex: 1; min-width: 0; }
+
+/* -- add-extra foot -------------------------------------------------------- */
+.shop-add { display: flex; gap: var(--s2); margin-top: var(--s3); }
