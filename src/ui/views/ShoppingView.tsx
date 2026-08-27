@@ -10,22 +10,13 @@
  *             mid-trip state survives page kills for free).
  * All writes go through Store commands (AGENTS.md rule 1).
  */
-import { useEffect, useRef, useState } from "preact/hooks";
-import { fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, ladderLabel } from "../../domain/format";
-import { readRung } from "../../domain/ladder";
+import { useState } from "preact/hooks";
+import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, parseDec } from "../../domain/format";
 import { shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
-import { Stepper } from "../components";
+import { InlineQtyInput, Stepper } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./shopping.css";
-
-/** Ladder items read as their rung, number items as qty (both units) — the
- *  same rendering rule QtyControl applies. */
-function qtyText(item: Item): string {
-  return item.display_mode === "ladder"
-    ? ladderLabel(item.quantity, readRung(item.quantity))
-    : fmtQtyBoth(item);
-}
 
 export function ShoppingView() {
   const doc = useDoc();
@@ -58,7 +49,7 @@ export function ShoppingView() {
             <div key={item.id} class="row shop-cart-row">
               <div class="row-main">
                 <div class="row-title">{item.name}</div>
-                <div class="row-sub">{qtyText(item)}</div>
+                <div class="row-sub">{fmtLevel(item)}</div>
               </div>
               <span class="shop-cart-mark" aria-hidden="true">
                 ✓
@@ -94,16 +85,23 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
       : "manual";
 
   const buy = (): void => {
+    // Capture the flag triple BEFORE the write: purchase always clears the
+    // flag, and the compensating recount cannot re-derive a manual flag (or
+    // a flag raised exactly ON the threshold boundary) from the quantity
+    // move alone — undoing a mistap must put the row back on the list.
+    const flagsBefore = {
+      flagged: item.flagged,
+      flag_source: item.flag_source,
+      flagged_at: item.flagged_at,
+    };
     store.purchase(item.id, pending);
     // QtyControl's toast pattern: the store mutated `item` in place, so
     // reading it again gives the post-write state; purchase is a gesture
-    // kind, so lastQuantityWrite() feeds the compensating undo. (Undo
-    // restores the quantity; the downward re-crossing re-raises a threshold
-    // flag, and a manual flag can be re-raised from the item itself.)
+    // kind, so lastQuantityWrite() feeds the compensating undo.
     const last = store.lastQuantityWrite();
-    const message = `Bought ${item.name} — ${qtyText(item)}`;
+    const message = `Bought ${item.name} — ${fmtLevel(item)}`;
     if (last === null) toast(message);
-    else toast(message, () => store.undoQuantity(last.itemId, last.qtyBefore));
+    else toast(message, () => store.undoQuantity(last.itemId, last.qtyBefore, flagsBefore));
   };
 
   const havePlenty = (): void => {
@@ -116,10 +114,14 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
 
   const actions = editing ? (
     entering ? (
-      <AmountInput
+      <InlineQtyInput
         initial={fmtQty(pending)}
-        onDone={(n) => {
+        onDone={(raw) => {
           setEntering(false);
+          if (raw === null) return;
+          // parseDec rejects blank/garbage/negative — any of those leaves
+          // the pending amount unchanged (the store rounds on the write).
+          const n = parseDec(raw);
           if (n !== null) setPending(n);
         }}
       />
@@ -156,7 +158,7 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
       <div class="row-main">
         <div class="row-title">{item.name}</div>
         <div class="row-sub">
-          {qtyText(item)} · {provenance}
+          {fmtLevel(item)} · {provenance}
         </div>
         <div class="shop-actions">{actions}</div>
       </div>
@@ -164,59 +166,6 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
         ✓
       </button>
     </div>
-  );
-}
-
-/** Inline decimal entry for the purchase amount. Same commit rules as the
- *  shell's quantity input: submit commits, blur commits only when changed,
- *  Escape cancels — an accidental tap elsewhere must not change the amount. */
-function AmountInput(props: { initial: string; onDone: (n: number | null) => void }) {
-  const [val, setVal] = useState(props.initial);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const done = useRef(false);
-
-  useEffect(() => {
-    // select() so typing replaces the old number — no delete-first dance.
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const finish = (raw: string | null): void => {
-    // Submit fires blur right after — first outcome wins, no double commit.
-    if (done.current) return;
-    done.current = true;
-    if (raw === null) {
-      props.onDone(null);
-      return;
-    }
-    // Decimal-comma tolerance; clamp >= 0 (the store rounds on write).
-    const n = Number(raw.trim().replace(",", "."));
-    props.onDone(raw.trim() === "" || !Number.isFinite(n) ? null : Math.max(0, n));
-  };
-
-  return (
-    <form
-      class="qty-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        finish(val);
-      }}
-    >
-      <input
-        ref={inputRef}
-        class="qty-input"
-        type="text"
-        inputMode="decimal"
-        autocomplete="off"
-        aria-label="Amount to buy"
-        value={val}
-        onInput={(e) => setVal(e.currentTarget.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") finish(null);
-        }}
-        onBlur={() => finish(val === props.initial ? null : val)}
-      />
-    </form>
   );
 }
 

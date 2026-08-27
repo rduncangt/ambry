@@ -13,16 +13,11 @@ import { useState } from "preact/hooks";
 import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
-import { groupedInventory, liveItems } from "../../store/selectors";
+import { STALE_DAYS, groupedInventory, liveItems, staleCount } from "../../store/selectors";
 import { now, type Item } from "../../types";
 import { QtyControl } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./inventory.css";
-
-/** UI hint only (code constant, not a setting): an item whose last human
- *  observation is older than this feeds the stale line's reconcile nudge. */
-const STALE_DAYS = 30;
-const DAY_MS = 86_400_000;
 
 /** " · "-joined non-empty caption parts, or null so the row-sub line is
  *  omitted entirely (no empty second line inflating row height). */
@@ -77,13 +72,9 @@ function GroupedPantry(props: { nowIso: string }) {
 
   const live = liveItems(doc);
   const flagged = live.filter((i) => i.flagged).length;
-  // "Stale" = last human observation too old. Never-verified items fall back
-  // to created_at so a freshly seeded pantry doesn't open with everything
-  // flagged stale — items age INTO the reconcile nudge instead.
-  const staleBefore = Date.parse(props.nowIso) - STALE_DAYS * DAY_MS;
-  const stale = live.filter(
-    (i) => Date.parse(i.verified_at ?? i.created_at) < staleBefore,
-  ).length;
+  // The canonical staleness rule lives in the selector so this line and the
+  // More tab's reconcile nudge can never disagree.
+  const stale = staleCount(doc, props.nowIso);
 
   return (
     <div>
@@ -150,12 +141,9 @@ function SearchResults(props: { query: string; nowIso: string }) {
   const candidates = hasExact
     ? []
     : duplicateCandidates(doc.items, props.query).filter(
-        (i) =>
-          // Live candidates the substring search already listed stay listed
-          // once; merge losers are excluded because restoring one would
-          // resurrect the exact duplicate the merge repaired (the survivor
-          // carries its name as an alias and surfaces here instead).
-          !resultIds.has(i.id) && !(i.deleted_at !== null && i.merged_into !== null),
+        // Live candidates the substring search already listed stay listed
+        // once (merge-loser tombstones are already excluded by the domain).
+        (i) => !resultIds.has(i.id),
       );
 
   return (
