@@ -1,0 +1,124 @@
+/* Item detail + create sheet — view-specific layout over the shared
+   primitives in styles.css. No new colors: tokens only. */
+
+/* Name is a full-width tap target so "tap to edit" needs no discovery. */
+.item-name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: var(--tap);
+  width: 100%;
+  text-align: left;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.item-name-pen { font-size: 15px; font-weight: 400; }
+.item-name-form .field-input { font-size: 20px; font-weight: 700; }
+.item-aliases { font-size: 13px; margin-top: var(--s1); }
+
+.item-section {
+  margin-top: var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.item-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* The quantity block is the screen's centerpiece — scale the shared control up. */
+.item-qty-block { align-items: flex-start; }
+.item-qty-block .qty-value,
+.item-qty-block .stepper-value { font-size: 22px; }
+.item-wide { width: 100%; }
+
+.item-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.item-field { display: flex; flex-direction: column; gap: var(--s2); }
+.item-label { font-size: 14px; font-weight: 600; }
+.item-hint { font-size: 13px; }
+
+/* Numeric entry: narrow, right-aligned, tabular — reads like a quantity. */
+.item-num {
+  max-width: 130px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.item-date { max-width: 190px; }
+.item-notes {
+  min-height: 64px;
+  padding: var(--s2) var(--s3);
+  resize: vertical;
+  font-family: inherit;
+}
+
+.item-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--tap);
+}
+.item-toggle input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+/* Compact history rows. */
+.item-history { list-style: none; margin: 0; padding: 0; }
+.item-event {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 36px;
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.item-event-glyph { width: 24px; text-align: center; flex-shrink: 0; }
+.item-event-qty {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.item-event-age { flex-shrink: 0; font-size: 13px; }
+
+/* Unit-change conversion preview. */
+.item-preview {
+  margin: 0;
+  padding-left: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.item-danger {
+  border-top: 1px solid var(--line);
+  padding-top: var(--s4);
+}
+
+/* Row-shaped buttons (merge picker, duplicate guard) reuse .row's layout;
+   these strip the native button chrome. */
+.item-pick,
+.dupe-row {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  width: 100%;
+  padding: var(--s2) 0;
+  color: var(--ink);
+}
+.dupe-guard { display: flex; flex-direction: column; }

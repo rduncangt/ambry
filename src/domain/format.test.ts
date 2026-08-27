@@ -1,0 +1,170 @@
+import { describe, expect, it } from "vitest";
+import { fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, ladderLabel } from "./format";
+import type { Item, LadderRung } from "../types";
+
+/** Minimal valid Item; tests override the fields they exercise. */
+function makeItem(over: Partial<Item> = {}): Item {
+  return {
+    id: "00000000-0000-0000-0000-000000000002",
+    name: "flour",
+    aliases: [],
+    notes: "",
+    category: null,
+    location: null,
+    unit: "bag",
+    quantity: 1,
+    package_size: { amount: 1000, unit: "g" },
+    display_mode: "number",
+    threshold: null,
+    flagged: false,
+    flag_source: null,
+    flagged_at: null,
+    restock_amount: 1,
+    never_prompt: false,
+    expiry: null,
+    barcodes: [],
+    verified_at: null,
+    merged_into: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    deleted_at: null,
+    ...over,
+  };
+}
+
+describe("fmtQty", () => {
+  const cases: Array<[number, string]> = [
+    [0.5, "0.5"],
+    [2, "2"],
+    [0.432, "0.432"],
+    [2.5, "2.5"],
+    [0, "0"],
+    // no trailing zeros
+    [2.5, "2.5"],
+    [1.1, "1.1"],
+    // display rounding kills float noise (PLAN.md §1.5)
+    [431.99999999, "432"],
+    [432.00000000000006, "432"],
+    [0.30000000000000004, "0.3"],
+    // trims to <= 3 decimals by rounding
+    [1.2344, "1.234"],
+    [1.9999, "2"],
+    [0.0004, "0"],
+    // negative zero never leaks
+    [-0.0001, "0"],
+  ];
+  it.each(cases)("fmtQty(%f) -> %j", (n, want) => {
+    expect(fmtQty(n)).toBe(want);
+  });
+});
+
+describe("fmtQtyUnit", () => {
+  const cases: Array<[number, string, string]> = [
+    // pluralization
+    [2, "bag", "2 bags"],
+    [1, "bag", "1 bag"],
+    [0.5, "bag", "0.5 bags"],
+    [0, "bag", "0 bags"],
+    // already ends in "s": never doubled
+    [2, "oats", "2 oats"],
+    // metric-ish symbols stay bare of the plural
+    [432, "g", "432 g"],
+    [2, "kg", "2 kg"],
+    [500, "ml", "500 ml"],
+    [2, "l", "2 l"],
+    // "count" renders as a bare number, case-insensitively
+    [3, "count", "3"],
+    [1, "count", "1"],
+    [3, "Count", "3"],
+    // non-alphabetic units don't pluralize
+    [2, "fl oz", "2 fl oz"],
+    // empty unit renders bare
+    [2, "", "2"],
+    // pluralization follows the DISPLAYED value: 1.0001 shows as "1"
+    [1.0001, "bag", "1 bag"],
+  ];
+  it.each(cases)("fmtQtyUnit(%f, %j) -> %j", (qty, unit, want) => {
+    expect(fmtQtyUnit(qty, unit)).toBe(want);
+  });
+});
+
+describe("ladderLabel", () => {
+  const cases: Array<[number, LadderRung, string]> = [
+    [1, "full", "Full"],
+    [0.5, "half", "Half"],
+    [0.2, "low", "Low"],
+    [0, "out", "Out"],
+    // qty > 1 renders the surplus, fmtQty'd (fractional N included)
+    [2, "full", "Full +1"],
+    [3, "full", "Full +2"],
+    [1.5, "full", "Full +0.5"],
+    [2.25, "full", "Full +1.25"],
+  ];
+  it.each(cases)("ladderLabel(%f, %s) -> %j", (qty, rung, want) => {
+    expect(ladderLabel(qty, rung)).toBe(want);
+  });
+});
+
+describe("fmtQtyBoth", () => {
+  it("shows both sides when package_size exists", () => {
+    const item = makeItem({ quantity: 0.4 });
+    expect(fmtQtyBoth(item)).toBe("0.4 bags (400 g)");
+  });
+
+  it("rounds the derived side at display time: 0.432 bags never prints 431.999... g", () => {
+    // 0.432 * 1000 === 432.00000000000006 in floats
+    const item = makeItem({ quantity: 0.432 });
+    expect(fmtQtyBoth(item)).toBe("0.432 bags (432 g)");
+  });
+
+  it("falls back to the single-sided form without a package_size", () => {
+    expect(fmtQtyBoth(makeItem({ quantity: 2, package_size: null }))).toBe("2 bags");
+  });
+
+  it("pluralizes a countable precise side", () => {
+    const item = makeItem({ unit: "box", quantity: 2, package_size: { amount: 8, unit: "stick" } });
+    // naive "+s" on both sides
+    expect(fmtQtyBoth(item)).toBe("2 boxs (16 sticks)");
+  });
+
+  it("works after a unit change left an inverted package (g -> bag)", () => {
+    const item = makeItem({ unit: "g", quantity: 432, package_size: { amount: 0.001, unit: "bag" } });
+    expect(fmtQtyBoth(item)).toBe("432 g (0.432 bags)");
+  });
+
+  it("renders a bare count with no package as just the number", () => {
+    expect(fmtQtyBoth(makeItem({ unit: "count", quantity: 3, package_size: null }))).toBe("3");
+  });
+});
+
+describe("fmtAge", () => {
+  const now = "2026-08-27T12:00:00.000Z";
+  const cases: Array<[string | null, string]> = [
+    [null, "never"],
+    // under a minute: just now
+    [now, "just now"],
+    ["2026-08-27T11:59:30.000Z", "just now"],
+    ["2026-08-27T11:59:00.001Z", "just now"],
+    // minutes: 1m up to 59m
+    ["2026-08-27T11:59:00.000Z", "1m ago"],
+    ["2026-08-27T11:30:00.000Z", "30m ago"],
+    ["2026-08-27T11:01:00.000Z", "59m ago"],
+    // hours: 1h up to 23h
+    ["2026-08-27T11:00:00.000Z", "1h ago"],
+    ["2026-08-26T13:00:00.000Z", "23h ago"],
+    ["2026-08-26T12:30:00.000Z", "23h ago"],
+    // days from 24h on
+    ["2026-08-26T12:00:00.000Z", "1d ago"],
+    ["2026-08-24T12:00:00.000Z", "3d ago"],
+    ["2026-07-18T12:00:00.000Z", "40d ago"],
+    // clock skew: a future timestamp never renders a negative age
+    ["2026-08-27T12:05:00.000Z", "just now"],
+  ];
+  it.each(cases)("fmtAge(%j) -> %j", (iso, want) => {
+    expect(fmtAge(iso, now)).toBe(want);
+  });
+
+  it("treats an unparseable timestamp as just now rather than NaN", () => {
+    expect(fmtAge("not-a-date", now)).toBe("just now");
+  });
+});

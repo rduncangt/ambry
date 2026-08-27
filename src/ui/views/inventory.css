@@ -1,0 +1,116 @@
+/* InventoryView-specific rules. Everything reusable (rows, badges, qty) comes
+   from styles.css; this file only pins the search bar and shapes the rows'
+   view-local affordances. */
+
+/* Last row must scroll clear of the fixed search bar (tap target + its
+   vertical padding + hairline), on top of .content's own tab-bar clearance. */
+.inv-view {
+  padding-bottom: calc(var(--tap) + var(--s2) * 2 + 1px + var(--s3));
+}
+
+/* Thumb-zone search: fixed directly above the tab bar. z-index sits below the
+   item overlay (40) and sheet (50) so detail screens cover it, above content. */
+.inv-searchbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  z-index: 20;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  padding: var(--s2) calc(var(--s4) + env(safe-area-inset-right)) var(--s2)
+    calc(var(--s4) + env(safe-area-inset-left));
+}
+.inv-search {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--s4);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  /* 16px floor: any smaller and iOS zooms the viewport on focus */
+  font-size: 16px;
+}
+.inv-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Flagged-count + stale-hint line above the groups. The stale hint is a real
+   button (it navigates to reconcile) styled as an inline link. */
+.inv-summary {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-bottom: var(--s2);
+}
+.inv-summary .flag-dot {
+  margin-right: var(--s1);
+}
+.inv-stale {
+  background: none;
+  border: none;
+  padding: 0 var(--s1);
+  min-height: var(--tap);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Location group header — quiet, so the rows stay the loudest thing. */
+.inv-loc {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  color: var(--muted);
+  margin-top: var(--s4);
+}
+
+.inv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The name area is a button (opens the item overlay): strip button chrome,
+   keep the .row-main flex sizing, stack title over caption. */
+.inv-open {
+  background: none;
+  border: none;
+  padding: var(--s1) 0;
+  min-height: var(--tap);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+}
+/* .row-title/.row-sub are spans here (button content model); ellipsis
+   truncation needs block layout. Scoped so shell usage stays untouched. */
+.inv-view .row-title,
+.inv-view .row-sub {
+  display: block;
+}
+
+.inv-create {
+  color: var(--accent);
+}
+.inv-deleted {
+  color: var(--muted);
+}
+
+/* Compact overflow target: the manual flag toggle. Narrower than --tap on
+   purpose (it is a secondary affordance beside the full-height row). */
+.inv-more {
+  background: none;
+  border: none;
+  color: var(--muted);
+  width: 36px;
+  min-height: var(--tap);
+  font-size: 20px;
+  flex-shrink: 0;
+  padding: 0;
+}
