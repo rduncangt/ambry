@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { SCHEMA_VERSION } from "../types";
+import { DEFAULT_RETENTION_DAYS, SCHEMA_VERSION } from "../types";
 import { InvalidDocError, MIGRATIONS, NewerSchemaError, migrateDoc } from "./migrations";
 
 /** Minimal valid current-shape doc as plain JSON-ish data. */
@@ -104,6 +104,69 @@ describe("migrateDoc — current version", () => {
     const raw = validRaw({ some_future_field: { keep: "me" } });
     const doc = migrateDoc(raw) as unknown as Record<string, unknown>;
     expect(doc.some_future_field).toEqual({ keep: "me" });
+  });
+});
+
+describe("migrateDoc — settings numeric coercion", () => {
+  function withSettings(patch: (settings: Record<string, unknown>) => void): Record<string, unknown> {
+    const raw = validRaw();
+    patch(raw.settings as Record<string, unknown>);
+    return raw;
+  }
+
+  it("fills DEFAULT_RETENTION_DAYS when a hand-edited backup lacks retention_days", () => {
+    // Without the coercion, pruneDoc's cutoff arithmetic goes NaN and every
+    // date comparison is false — history gets silently mishandled.
+    const raw = withSettings((s) => delete s.retention_days);
+    expect(migrateDoc(raw).settings.retention_days).toBe(DEFAULT_RETENTION_DAYS);
+  });
+
+  const retentionCases: Array<[string, unknown]> = [
+    ["NaN", NaN],
+    ["Infinity", Infinity],
+    ["a string", "365"],
+    ["null", null],
+    ["zero", 0],
+    ["negative", -5],
+  ];
+  it.each(retentionCases)("coerces retention_days=%s to the default", (_label, v) => {
+    const raw = withSettings((s) => (s.retention_days = v));
+    expect(migrateDoc(raw).settings.retention_days).toBe(DEFAULT_RETENTION_DAYS);
+  });
+
+  it("floors a fractional retention_days instead of discarding it", () => {
+    const raw = withSettings((s) => (s.retention_days = 30.9));
+    expect(migrateDoc(raw).settings.retention_days).toBe(30);
+  });
+
+  const writesCases: Array<[string, unknown]> = [
+    ["missing", "DELETE"],
+    ["NaN", NaN],
+    ["a string", "3"],
+    ["negative", -1],
+  ];
+  it.each(writesCases)("coerces writes_since_export=%s to 0", (_label, v) => {
+    const raw = withSettings((s) => {
+      if (v === "DELETE" && _label === "missing") delete s.writes_since_export;
+      else s.writes_since_export = v;
+    });
+    expect(migrateDoc(raw).settings.writes_since_export).toBe(0);
+  });
+
+  it("keeps valid values and returns a clean doc untouched (same reference)", () => {
+    const raw = validRaw();
+    const doc = migrateDoc(raw);
+    expect(doc.settings.retention_days).toBe(365);
+    expect(doc.settings.writes_since_export).toBe(0);
+    expect(doc).toBe(raw);
+  });
+
+  it("coercion copies rather than mutating the input document", () => {
+    const raw = withSettings((s) => delete s.retention_days);
+    const before = JSON.stringify(raw);
+    const doc = migrateDoc(raw);
+    expect(doc.settings.retention_days).toBe(DEFAULT_RETENTION_DAYS);
+    expect(JSON.stringify(raw)).toBe(before);
   });
 });
 
