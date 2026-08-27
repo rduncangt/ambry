@@ -1,17 +1,385 @@
-/* Placeholder — the UI milestone owns real styling. iOS hygiene from day one:
-   dvh not 100vh, >=16px inputs (else iOS zooms), safe-area padding. */
+/* ==========================================================================
+   Ambry design system — honest and utilitarian, one-handed iPhone first.
+   iOS hygiene throughout: dvh/svh never 100vh; inputs >= 16px (else iOS
+   zooms); env(safe-area-inset-*) on everything pinned to an edge;
+   overscroll contained. View files may add view-specific rules but reuse
+   these primitives.
+   ========================================================================== */
+
+/* -- tokens ---------------------------------------------------------------- */
 :root {
-  --bg: #faf6f0;
-  --fg: #2b2015;
-  --accent: #8a5a2b;
+  /* warm pantry palette */
+  --bg: #faf6f0;          /* page ground */
+  --ink: #2b2015;         /* primary text */
+  --accent: #8a5a2b;      /* actions, active states */
+  --danger: #b3372c;      /* out / destructive / warnings */
+  --ok: #3d7a3d;          /* confirmations */
+  --muted: #8c7f6f;       /* secondary text */
+  --card: #ffffff;        /* raised surfaces: sheets, tab bar, rows */
+  --line: #e6dccc;        /* hairline borders */
+  --accent-soft: #f1e6d7; /* info banner ground */
+  --warn-soft: #f7ecd2;   /* warn banner ground */
+  --danger-soft: #f6ded9; /* out-badge ground */
+
+  /* spacing scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+
+  --radius: 10px;
+  --tap: 44px;            /* minimum tap target */
+  --tabbar-h: 56px;
 }
+
+/* -- reset / base ---------------------------------------------------------- */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.4 -apple-system, system-ui, sans-serif;
+  color: var(--ink);
+  font: 16px/1.45 -apple-system, system-ui, "Segoe UI", sans-serif;
   min-height: 100dvh;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* no rubber-band chaining into browser chrome mid-aisle */
+  overscroll-behavior-y: contain;
+  -webkit-tap-highlight-color: transparent;
 }
-input, select, textarea, button { font-size: 16px; }
+/* 16px floor everywhere: any smaller and iOS zooms the viewport on focus */
+input, select, textarea, button { font: inherit; font-size: 16px; color: inherit; }
+h1, h2, h3, p { margin: 0; }
+
+/* -- app frame -------------------------------------------------------------
+   .app     — column frame; top safe-area padding (standalone status bar)
+   .content — the scroll region; bottom padding clears the fixed tab bar
+   .banners — static stack above the content (update / install / export)   */
+.app {
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.content {
+  padding: var(--s4);
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s5));
+}
+.banners { display: flex; flex-direction: column; }
+
+/* -- view scaffolding ------------------------------------------------------
+   .view / .view-title — a tab screen and its heading
+   .screen-head / .back-btn / .screen-title — in-app back header (standalone
+   iOS has no browser chrome; a dead-end screen is a force-quit)
+   .overlay / .overlay-body — full-screen item-detail layer over the tabs   */
+.view-title { font-size: 22px; font-weight: 700; margin-bottom: var(--s3); }
+.screen-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: var(--tap);
+  margin-bottom: var(--s2);
+}
+.back-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 0 var(--s2) 0 0;
+}
+.screen-title {
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--bg);
+  overflow-y: auto;
+  padding: env(safe-area-inset-top) var(--s4) calc(env(safe-area-inset-bottom) + var(--s5));
+}
+.overlay-body { padding-top: var(--s2); }
+
+/* -- buttons ---------------------------------------------------------------
+   .btn — base tappable; .btn-primary accent fill; .btn-danger destructive;
+   .btn-big full-width primary action (boot screen, sheets)               */
+.btn {
+  min-height: var(--tap);
+  padding: 0 var(--s4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+}
+.btn:active { filter: brightness(0.95); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+.btn-big { width: 100%; min-height: 52px; }
+
+/* -- chips -----------------------------------------------------------------
+   .chip / .chip-active — pill toggles (ladder rungs, unit picker);
+   .chips — a wrapping row of them                                         */
+.chip {
+  min-height: var(--tap);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.chip-active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+
+/* -- list rows -------------------------------------------------------------
+   .row — generous one-handed list row; .row-main fills, .row-title /
+   .row-sub are its two text lines. Rows sit directly on the page ground. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 56px;
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.row-main { flex: 1; min-width: 0; }
+.row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-sub { font-size: 14px; color: var(--muted); }
+
+/* -- badges & markers ------------------------------------------------------
+   .badge — small status pill; .badge-out — the zero-quantity state
+   .flag-dot — flagged-for-shopping marker; .nobell — never_prompt marker
+   .muted — secondary-text utility                                        */
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--ink);
+}
+.badge-out { background: var(--danger-soft); color: var(--danger); }
+.flag-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.nobell { opacity: 0.45; font-size: 14px; }
+.muted { color: var(--muted); }
+
+/* -- banners ---------------------------------------------------------------
+   .banner (+ .banner-info / .banner-warn) — full-width notices with one
+   action; .banner-body / .banner-actions are its two halves              */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.banner-info { background: var(--accent-soft); }
+.banner-warn { background: var(--warn-soft); }
+.banner-body { flex: 1; min-width: 0; }
+.banner-actions { display: flex; gap: var(--s2); flex-shrink: 0; }
+
+/* -- bottom sheet ----------------------------------------------------------
+   .sheet-backdrop dims and dismisses; .sheet rises from the thumb zone,
+   safe-area padded; .sheet-head / .sheet-title / .sheet-close            */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(43, 32, 21, 0.45);
+  display: flex;
+  align-items: flex-end;
+}
+.sheet {
+  width: 100%;
+  max-height: 85dvh;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 16px 16px 0 0;
+  padding: var(--s4);
+  padding-bottom: calc(var(--s4) + env(safe-area-inset-bottom));
+}
+.sheet-head { display: flex; align-items: center; margin-bottom: var(--s3); }
+.sheet-title { flex: 1; font-size: 18px; font-weight: 700; }
+.sheet-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  width: var(--tap);
+  height: var(--tap);
+  margin: calc(-1 * var(--s2));
+}
+
+/* -- tab bar ---------------------------------------------------------------
+   .tabbar fixed in the thumb zone; .tab / .tab-active; .tab-badge count
+   bubble (Shopping); .tab-dot subtle export-nag chip (More)              */
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  background: var(--card);
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.tab {
+  flex: 1;
+  min-height: var(--tabbar-h);
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s1);
+}
+.tab-active { color: var(--accent); font-weight: 700; }
+.tab-badge {
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* -- toast -----------------------------------------------------------------
+   Single toast fixed above the tab bar; .toast-msg / .toast-undo          */
+.toast {
+  position: fixed;
+  left: var(--s4);
+  right: var(--s4);
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s4));
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  background: var(--ink);
+  color: var(--bg);
+  padding: var(--s3) var(--s4);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(43, 32, 21, 0.3);
+}
+.toast-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast-undo {
+  background: none;
+  border: none;
+  color: #eec388;
+  font-weight: 700;
+  min-height: var(--tap);
+  padding: 0 var(--s2);
+  flex-shrink: 0;
+}
+
+/* -- quantity control ------------------------------------------------------
+   .qty wraps marks + control; .qty-marks indicator cluster; .qty-value
+   tappable value (opens absolute entry); .qty-sub secondary both-units
+   text; .qty-form / .qty-input inline decimal entry; .stepper /
+   .stepper-btn / .stepper-value; .ladder chip row                        */
+.qty { display: inline-flex; align-items: center; gap: var(--s2); }
+.qty-marks { display: inline-flex; align-items: center; gap: var(--s1); }
+.qty-value {
+  background: none;
+  border: none;
+  color: var(--ink);
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: 0 var(--s2);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  line-height: 1.2;
+}
+.qty-sub { font-size: 12px; font-weight: 400; }
+.qty-form { display: inline-flex; }
+.qty-input {
+  width: 96px;
+  min-height: var(--tap);
+  padding: 0 var(--s2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--card);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.stepper { display: inline-flex; align-items: center; gap: var(--s1); }
+.stepper-btn {
+  width: var(--tap);
+  height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  font-size: 22px;
+  line-height: 1;
+}
+.stepper-btn:active { filter: brightness(0.95); }
+.stepper-value {
+  min-width: 56px;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: none;
+  border: none;
+  min-height: var(--tap);
+  padding: 0 var(--s1);
+}
+.ladder { display: inline-flex; gap: var(--s1); }
+
+/* -- forms -----------------------------------------------------------------
+   .field-input — standard text input; .create-form — quick-create layout  */
+.field-input {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.field-input:focus { outline: none; border-color: var(--accent); }
+.create-form { display: flex; flex-direction: column; gap: var(--s4); }
+
+/* -- boot screen -----------------------------------------------------------
+   Restore-first gate; .boot centers, .boot-actions stacks the choices     */
+.boot {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s4);
+  padding: var(--s5);
+  padding-top: calc(env(safe-area-inset-top) + var(--s5));
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--s5));
+  max-width: 28rem;
+  margin: 0 auto;
+}
+.boot-title { font-size: 28px; font-weight: 800; }
+.boot-msg { color: var(--ink); }
+.boot-error { color: var(--danger); font-weight: 600; }
+.boot-actions { display: flex; flex-direction: column; gap: var(--s3); }
+.boot-preview { display: flex; flex-direction: column; gap: var(--s3); }
