@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planPackageResize, planUnitChange, toItemUnit, toPreciseUnit } from "./units";
+import { planPackageResize, planUnitChange, toPreciseUnit } from "./units";
 import type { Item } from "../types";
 
 /** Minimal valid Item; tests override the fields they exercise. */
@@ -31,50 +31,6 @@ function makeItem(over: Partial<Item> = {}): Item {
     ...over,
   };
 }
-
-describe("toItemUnit", () => {
-  const bag = makeItem(); // unit "bag", 1 bag = 1000 g
-
-  it("converts the package measure down into the item unit: 432 g -> 0.432 bag", () => {
-    expect(toItemUnit(bag, 432, "g")).toBeCloseTo(0.432, 10);
-  });
-
-  it("is identity for the item's own unit: 2 bag -> 2", () => {
-    expect(toItemUnit(bag, 2, "bag")).toBe(2);
-  });
-
-  it("returns null for an unrelated unit", () => {
-    expect(toItemUnit(bag, 3, "lb")).toBeNull();
-    expect(toItemUnit(bag, 3, "")).toBeNull();
-  });
-
-  const caseCases: Array<[number, string, number]> = [
-    [2, " BAG ", 2], // item unit, case-insensitive + trimmed
-    [500, "G", 0.5], // package unit, case-insensitive
-    [250, "  g ", 0.25], // package unit, trimmed
-  ];
-  it.each(caseCases)("unit comparison is case-insensitive-trimmed: (%f, %j) -> %f", (amount, measure, want) => {
-    expect(toItemUnit(bag, amount, measure)).toBeCloseTo(want, 10);
-  });
-
-  it("without a package_size only the item's own unit converts", () => {
-    const loose = makeItem({ package_size: null });
-    expect(toItemUnit(loose, 2, "bag")).toBe(2);
-    expect(toItemUnit(loose, 432, "g")).toBeNull();
-  });
-
-  it("a non-positive package amount gives no conversion (never divides by zero)", () => {
-    const broken = makeItem({ package_size: { amount: 0, unit: "g" } });
-    expect(toItemUnit(broken, 432, "g")).toBeNull();
-    expect(toItemUnit(broken, 2, "bag")).toBe(2); // identity path unaffected
-  });
-
-  it("result is unrounded — callers round on write", () => {
-    // 1/3 of a 3-pack: exact float division, no 3-decimal rounding here
-    const pack = makeItem({ package_size: { amount: 3, unit: "stick" } });
-    expect(toItemUnit(pack, 1, "stick")).toBe(1 / 3);
-  });
-});
 
 describe("toPreciseUnit", () => {
   it("multiplies quantity through the package: 0.4 bag of {1000,g} -> 400 g", () => {

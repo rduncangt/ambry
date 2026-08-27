@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, ladderLabel } from "./format";
+import {
+  RUNG_LABELS,
+  fmtAge,
+  fmtLevel,
+  fmtQty,
+  fmtQtyBoth,
+  fmtQtyUnit,
+  ladderLabel,
+  parseDec,
+} from "./format";
 import type { Item, LadderRung } from "../types";
 
 /** Minimal valid Item; tests override the fields they exercise. */
@@ -134,6 +143,67 @@ describe("fmtQtyBoth", () => {
 
   it("renders a bare count with no package as just the number", () => {
     expect(fmtQtyBoth(makeItem({ unit: "count", quantity: 3, package_size: null }))).toBe("3");
+  });
+});
+
+describe("RUNG_LABELS", () => {
+  it("maps every rung to its display word", () => {
+    expect(RUNG_LABELS).toEqual({ full: "Full", half: "Half", low: "Low", out: "Out" });
+  });
+
+  it("agrees with ladderLabel for single-container quantities", () => {
+    // The exported map and the label function must never drift apart.
+    expect(ladderLabel(1, "full")).toBe(RUNG_LABELS.full);
+    expect(ladderLabel(0, "out")).toBe(RUNG_LABELS.out);
+  });
+});
+
+describe("fmtLevel", () => {
+  it("renders a ladder item as its rung label from the quantity", () => {
+    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 1 }))).toBe("Full");
+    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0.5 }))).toBe("Half");
+    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0.2 }))).toBe("Low");
+    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0 }))).toBe("Out");
+  });
+
+  it("keeps the multi-container surplus visible on ladder items", () => {
+    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 3 }))).toBe("Full +2");
+  });
+
+  it("renders a numeric item with both sides via fmtQtyBoth", () => {
+    expect(fmtLevel(makeItem({ display_mode: "number", quantity: 0.4 }))).toBe(
+      "0.4 bags (400 g)",
+    );
+    expect(
+      fmtLevel(makeItem({ display_mode: "number", quantity: 2, package_size: null })),
+    ).toBe("2 bags");
+  });
+});
+
+describe("parseDec", () => {
+  const cases: Array<[string, number | null]> = [
+    ["2", 2],
+    ["0.5", 0.5],
+    ["0", 0],
+    ["  1.25  ", 1.25],
+    // decimal comma is a decimal point
+    ["0,5", 0.5],
+    ["  2,25 ", 2.25],
+    // empty and garbage
+    ["", null],
+    ["   ", null],
+    ["abc", null],
+    ["1.2.3", null],
+    // quantities are never negative
+    ["-1", null],
+    ["-0.5", null],
+    // non-finite never leaks into quantities
+    ["Infinity", null],
+    ["-Infinity", null],
+    ["NaN", null],
+  ];
+  it.each(cases)("parseDec(%j) -> %j", (text, want) => {
+    expect(parseDec(text)).toBe(want);
   });
 });
 
