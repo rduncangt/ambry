@@ -22,9 +22,10 @@ export function fold(s: string): string {
 }
 
 /**
- * Folded tokens with naive singularization: a token longer than 3 chars ending
- * in "s" (but not "ss") drops the final "s". "Canned Tomatoes" -> ["canned","tomatoe"].
- * Deliberately naive — at ~300 items this catches bags/bag, tomatoes/tomatoe.
+ * Folded tokens with naive singularization ("ies" -> "y", drop "-es" after
+ * sibilants and "o", else drop a trailing "s"). "Canned Tomatoes" ->
+ * ["canned","tomato"]. Deliberately naive — at ~300 items this catches
+ * bags/bag, tomatoes/tomato, berries/berry without a real inflection table.
  */
 export function tokens(s: string): string[] {
   const folded = fold(s);
@@ -33,10 +34,17 @@ export function tokens(s: string): string[] {
 }
 
 /**
- * Drop a trailing "s" from plural-looking tokens. The length > 3 guard keeps
- * short words like "gas" intact; the "ss" guard keeps "swiss"/"glass" intact.
+ * Naive singular form, tried in three tiers so the singular a user actually
+ * types collides with the plural already stored (and vice versa):
+ * 1. "ies" -> "y" (berries -> berry); length > 4 keeps "pies" out of this tier.
+ * 2. Drop "es" after a sibilant-ish ending or "o" (boxes -> box,
+ *    peaches -> peach, tomatoes -> tomato); length > 3 guards tiny words.
+ * 3. Drop a bare trailing "s"; the length > 3 guard keeps short words like
+ *    "gas" intact and the "ss" guard keeps "swiss"/"glass" intact.
  */
 function singularize(token: string): string {
+  if (token.length > 4 && token.endsWith("ies")) return `${token.slice(0, -3)}y`;
+  if (token.length > 3 && /([sxz]|[cs]h|o)es$/.test(token)) return token.slice(0, -2);
   return token.length > 3 && token.endsWith("s") && !token.endsWith("ss")
     ? token.slice(0, -1)
     : token;

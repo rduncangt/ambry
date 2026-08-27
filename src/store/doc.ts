@@ -59,14 +59,26 @@ export function loadDoc(adapter: StorageAdapter): LoadResult {
         : undefined;
     const needsMigration = typeof version === "number" && version < SCHEMA_VERSION;
     if (needsMigration) {
-      writeSnapshot(adapter, `pre-migrate-v${version}`, raw);
+      try {
+        writeSnapshot(adapter, `pre-migrate-v${version}`, raw);
+      } catch {
+        // Quota: the safety copy could not be written. Degrade rather than
+        // crash the boot — the original bytes still sit at DOC_KEY until the
+        // post-migrate save below replaces them.
+      }
     }
 
     const doc = migrateDoc(parsed);
     if (needsMigration) {
-      // Persist the migrated shape immediately so every later read this
-      // session — and the next boot — sees the current schema.
-      saveDoc(adapter, doc);
+      try {
+        // Persist the migrated shape immediately so every later read this
+        // session — and the next boot — sees the current schema.
+        saveDoc(adapter, doc);
+      } catch {
+        // Quota at boot must degrade, not crash createStore: this session
+        // still gets the migrated doc, and the store's own save path (with
+        // its retry + saveError surface) owns persistence from here.
+      }
       return { doc, status: "migrated" };
     }
     return { doc, status: "loaded" };
@@ -74,7 +86,13 @@ export function loadDoc(adapter: StorageAdapter): LoadResult {
     // Parse OR validation failure (a newer-schema doc lands here too: the
     // running app cannot use it either way). Stash first — the stash is the
     // recovery path; the empty doc is only a placeholder for the boot screen.
-    writeSnapshot(adapter, "corrupt-" + now(), raw);
+    try {
+      writeSnapshot(adapter, "corrupt-" + now(), raw);
+    } catch {
+      // Even the stash can fail (quota). The original bytes still sit at
+      // DOC_KEY — and the boot rule keeps the placeholder unpersisted — so
+      // returning the corrupt boot screen loses nothing.
+    }
     return { doc: emptyDoc(), status: "corrupt" };
   }
 }

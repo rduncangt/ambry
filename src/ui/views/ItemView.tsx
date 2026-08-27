@@ -7,12 +7,12 @@
  * keep-amount/keep-count — so a number never silently changes meaning.
  */
 import { useEffect, useRef, useState } from "preact/hooks";
-import { fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit } from "../../domain/format";
+import { RUNG_LABELS, fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, parseDec } from "../../domain/format";
 import { rungValue } from "../../domain/ladder";
 import { historyFor, planMerge } from "../../domain/merge";
 import { duplicateCandidates, searchItems } from "../../domain/search";
 import { planPackageResize, planUnitChange, toPreciseUnit } from "../../domain/units";
-import { valuesInUse } from "../../store/selectors";
+import { resolveVocabValue, valuesInUse } from "../../store/selectors";
 import type { CreateItemInput } from "../../store/store";
 import {
   COMMON_UNITS,
@@ -32,17 +32,7 @@ import "./item.css";
 // Small shared helpers
 // ---------------------------------------------------------------------------
 
-/** Decimal-comma-tolerant parse; null for blank/garbage (store rounds/clamps). */
-function parseDec(raw: string): number | null {
-  const t = raw.trim().replace(",", ".");
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
-}
-
 const normUnit = (u: string): string => u.trim().toLowerCase();
-
-const RUNG_TEXT: Record<LadderRung, string> = { full: "Full", half: "Half", low: "Low", out: "Out" };
 
 /**
  * Which rung chip a numeric threshold displays as: the highest rung whose tap
@@ -99,8 +89,9 @@ function DecDraft(props: {
       else setDraft(props.canonical);
       return;
     }
+    // parseDec already rejects negatives, so only the zero rule is local.
     const n = parseDec(draft);
-    if (n === null || n < 0 || (props.requirePositive && n <= 0)) {
+    if (n === null || (props.requirePositive && n <= 0)) {
       // Invalid entry reverts visibly instead of pretending it stuck.
       setDraft(props.canonical);
       return;
@@ -155,7 +146,10 @@ function PickerRow(props: {
   const addNew = (): void => {
     const raw = window.prompt(`New ${props.label.toLowerCase()}`);
     if (raw === null) return;
-    const v = raw.trim();
+    // Case-insensitive match reuses the EXISTING casing — iOS capitalizes
+    // the first letter of prompt() text, which must not mint "Fridge"
+    // beside "fridge".
+    const v = resolveVocabValue(options, raw);
     if (v !== "") props.onPick(v);
   };
   return (
@@ -629,6 +623,27 @@ function PackageSheet(props: { item: Item; onClose: () => void }) {
         <button type="button" class="btn btn-primary btn-big" disabled={!valid} onClick={submit}>
           Save package size
         </button>
+        {item.package_size !== null && (
+          <>
+            <button
+              type="button"
+              class="btn btn-big"
+              onClick={() => {
+                // Drops only the bag<->contents link: quantity, threshold and
+                // unit keep their values (the store records a unit_change
+                // event with the removal in its note).
+                store.clearPackageSize(item.id);
+                toast(`${item.name}: package size removed`);
+                props.onClose();
+              }}
+            >
+              Remove package size
+            </button>
+            <p class="muted item-hint">
+              Removing it keeps the numbers — Ambry just stops showing the converted side.
+            </p>
+          </>
+        )}
       </div>
     </Sheet>
   );
@@ -813,8 +828,9 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
           {survivor !== undefined && (
             <>
               {" "}
-              Merged into <strong>{survivor.name}</strong> — its quantity moved there, so
-              recount after restoring.
+              Its identity was merged into <strong>{survivor.name}</strong>; restoring
+              separates them into two items again. The quantity moved to{" "}
+              {survivor.name} during the merge, so recount after restoring.
             </>
           )}
         </Banner>
@@ -1001,7 +1017,7 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
                   // Stored as the rung's numeric value (PLAN.md §1.7).
                   onClick={() => store.editItem(item.id, { threshold: rungValue(r) })}
                 >
-                  {RUNG_TEXT[r]}
+                  {RUNG_LABELS[r]}
                 </button>
               ))}
             </div>
@@ -1220,10 +1236,12 @@ export function CreateSheet() {
     });
   })();
 
-  const addNewValue = (label: string, set: (v: string) => void): void => {
+  const addNewValue = (label: string, existing: string[], set: (v: string) => void): void => {
     const raw = window.prompt(`New ${label}`);
     if (raw === null) return;
-    const v = raw.trim();
+    // Reuse existing casing on a case-insensitive match — iOS capitalizes
+    // prompt() text, which must not mint "Fridge" beside "fridge".
+    const v = resolveVocabValue(existing, raw);
     if (v !== "") set(v);
   };
 
@@ -1346,7 +1364,11 @@ export function CreateSheet() {
                 {o}
               </button>
             ))}
-            <button type="button" class="chip" onClick={() => addNewValue("location", setLocation)}>
+            <button
+              type="button"
+              class="chip"
+              onClick={() => addNewValue("location", locationOptions, setLocation)}
+            >
               ＋ New…
             </button>
           </div>
@@ -1365,7 +1387,11 @@ export function CreateSheet() {
                 {o}
               </button>
             ))}
-            <button type="button" class="chip" onClick={() => addNewValue("category", setCategory)}>
+            <button
+              type="button"
+              class="chip"
+              onClick={() => addNewValue("category", valuesInUse(doc, "category"), setCategory)}
+            >
               ＋ New…
             </button>
           </div>

@@ -28,8 +28,8 @@ import {
   type LadderRung,
   type ShoppingExtra,
 } from "../types";
-import { SNAPSHOT_PREFIX, type StorageAdapter } from "./adapter";
-import { loadDoc, saveDoc, writeSnapshot, type BootStatus } from "./doc";
+import { DOC_KEY, SNAPSHOT_PREFIX, type StorageAdapter } from "./adapter";
+import { loadDoc, writeSnapshot, type BootStatus } from "./doc";
 import { flagTransition } from "../domain/flags";
 import { rungValue } from "../domain/ladder";
 import { planMerge } from "../domain/merge";
@@ -82,14 +82,31 @@ export interface Store {
   bootStatus(): BootStatus;
   /** Most recent quantity-affecting event (for the undo toast), if within its undo window. */
   lastQuantityWrite(): { itemId: string; qtyBefore: number } | null;
+  /**
+   * True while the most recent save attempt threw (e.g. quota exceeded). The
+   * doc stays dirty so flush()/the next mutation retries; the next successful
+   * save clears this.
+   */
+  saveError(): boolean;
+  /**
+   * True once another tab/context has written DOC_KEY behind this store. From
+   * then on EVERY save is refused — overwriting would silently destroy the
+   * other context's data — until a reload re-reads storage.
+   */
+  storageConflict(): boolean;
 
   // -- item lifecycle -----------------------------------------------------
   /** Applies defaults; display_mode "ladder" with no threshold gets LADDER_DEFAULT_THRESHOLD. Emits `create`. */
   createItem(input: CreateItemInput): Item;
   /** Non-quantity field edits. display_mode -> "ladder" with null threshold also applies the ladder default. No event (updated_at only). */
   editItem(id: string, fields: EditItemFields): void;
-  /** Soft delete / restore. Emit `delete` / `restore` (qty_before = qty_after = quantity). */
+  /** Soft delete. Emits `delete` (qty_before = qty_after = quantity). */
   softDelete(id: string): void;
+  /**
+   * Undelete. Emits `restore` (qty_before = qty_after = quantity) and clears
+   * merged_into: a restored merge-loser is a live item again, so its history
+   * must stop resolving to the merge survivor.
+   */
   restore(id: string): void;
 
   // -- quantity (all round + clamp via roundQty; all evaluate flags) ------
@@ -101,8 +118,19 @@ export interface Store {
   setLadderRung(id: string, rung: LadderRung): void;
   /** Shopping check-off: qty += amount ?? restock_amount, kind `purchase`, ALWAYS clears the flag. */
   purchase(id: string, amount?: number): void;
-  /** Undo the last quantity write: compensating `recount` back to qtyBefore (no verified_at stamp). */
-  undoQuantity(itemId: string, qtyBefore: number): void;
+  /**
+   * Undo the last quantity write: compensating `recount` back to qtyBefore
+   * (no verified_at stamp). Callers capture the item's flag triple BEFORE
+   * their write and pass it as `restoreFlags`; those three fields are applied
+   * in the SAME commit, overriding the compensating write's own flag
+   * evaluation — undo must also put back flag state the original write
+   * changed (a purchase's clear, a crossing's raise).
+   */
+  undoQuantity(
+    itemId: string,
+    qtyBefore: number,
+    restoreFlags?: { flagged: boolean; flag_source: "threshold" | "manual" | null; flagged_at: string | null },
+  ): void;
 
   // -- flags --------------------------------------------------------------
   flagManual(id: string): void;
@@ -126,6 +154,13 @@ export interface Store {
   ): void;
   /** Package-size edit with keep-amount/keep-count decision; records `unit_change` with a note. */
   resizePackage(id: string, newPackage: { amount: number; unit: string }, keep: "amount" | "count"): void;
+  /**
+   * Remove the package definition (package_size -> null). Quantity and
+   * threshold are untouched and the unit string does not change (so no
+   * unit_before); records a `unit_change` event whose note carries the
+   * change ("package 1000 g -> none"). No-op when there is no package.
+   */
+  clearPackageSize(id: string): void;
 
   // -- merge (PLAN.md §2) --------------------------------------------------
   /** Loser -> tombstone with merged_into; survivor gains aliases/flag; `merge` event on survivor records resolvedQty. */
@@ -142,12 +177,36 @@ export interface Store {
   buildExport(): ExportEnvelope;
   /** Stamp last_export_at, zero writes_since_export. */
   recordExport(): void;
-  /** Gated replace: snapshot current doc first ("pre-import-<iso>"), then swap in the (already migrated) doc. */
+  /**
+   * Gated replace: snapshot the current doc first ("pre-import-<iso>"), then
+   * persist the (already migrated) new doc; ONLY a successful persist swaps
+   * the in-memory doc. On failure (quota throw, storage conflict) memory and
+   * the stored doc are both untouched and { ok: false } comes back — the app
+   * must never keep running on an imported doc that never landed on disk.
+   */
   importReplace(doc: AmbryDoc): ImportOutcome;
   /** Launch-time retention pass (prune.ts). */
   prune(): void;
-  /** Immediate synchronous save (pagehide / visibilitychange). */
+  /**
+   * Immediate synchronous save (pagehide / visibilitychange). A failed save
+   * keeps the doc dirty and raises saveError(); a cross-context clobber
+   * raises storageConflict() instead of overwriting.
+   */
   flush(): void;
+  /**
+   * Snapshot inventory (SNAPSHOT_PREFIX keys on this store's adapter) with
+   * UTF-8 sizes, sorted newest-first by key (snapshot names embed ISO
+   * timestamps). Read-only.
+   */
+  listSnapshots(): { key: string; bytes: number }[];
+  /** Raw text of one snapshot, or null when missing (or not a snapshot key). Read-only. */
+  snapshotText(key: string): string | null;
+  /**
+   * Permanently remove one snapshot. Storage housekeeping, not a doc
+   * mutation: no history event, writes_since_export does not move, and only
+   * snapshot keys can ever be removed.
+   */
+  deleteSnapshot(key: string): void;
   /** Settings edits (retention_days, device_label). */
   updateSettings(fields: Partial<Pick<AmbryDoc["settings"], "retention_days" | "device_label">>): void;
 }
@@ -174,6 +233,17 @@ export function createStore(
   // persist its placeholder doc, so flush() on pagehide with no mutations
   // writes nothing (loadDoc deliberately did not persist it either).
   let dirty = false;
+  // Set when a persist threw (quota); cleared by the next successful save.
+  let saveFailed = false;
+  // Set when DOC_KEY changed underneath us (another tab/context wrote);
+  // permanent for this store's lifetime — only a reload re-reads storage.
+  let conflict = false;
+  // The exact raw string this store last read from / wrote to DOC_KEY.
+  // Every persist compares storage against it first: any other value means
+  // another context wrote, and saving would silently clobber its data.
+  // Initialized right after load so a migrated boot remembers the bytes
+  // loadDoc just saved back.
+  let lastKnownRaw = adapter.get(DOC_KEY);
 
   function notify(): void {
     // Copy first so a listener unsubscribing (or subscribing) mid-notify
@@ -181,10 +251,37 @@ export function createStore(
     for (const listener of [...listeners]) listener();
   }
 
+  /** Cross-context clobber guard: false (and conflict latched) when DOC_KEY changed under us. */
+  function storageStillOurs(): boolean {
+    if (conflict) return false;
+    const onDisk = adapter.get(DOC_KEY);
+    if (onDisk !== null && onDisk !== lastKnownRaw) {
+      conflict = true;
+      notify();
+      return false;
+    }
+    return true;
+  }
+
   function persistNow(): void {
     if (!dirty) return;
-    saveDoc(adapter, doc);
-    dirty = false;
+    if (!storageStillOurs()) return; // stay dirty; saves are refused for good
+    try {
+      const raw = JSON.stringify(doc);
+      adapter.set(DOC_KEY, raw);
+      lastKnownRaw = raw;
+      dirty = false;
+      if (saveFailed) {
+        // Recovery is UI-visible state (the save-failure banner comes down).
+        saveFailed = false;
+        notify();
+      }
+    } catch {
+      // Quota (or any storage failure): stay dirty so flush()/the next
+      // mutation retries, and surface the failure via saveError().
+      saveFailed = true;
+      notify();
+    }
   }
 
   function flushNow(): void {
@@ -241,7 +338,12 @@ export function createStore(
     item: Item,
     after: number,
     kind: EventKind,
-    opts: { stampVerified?: boolean; unitBefore?: string; note?: string } = {},
+    opts: {
+      stampVerified?: boolean;
+      unitBefore?: string;
+      note?: string;
+      restoreFlags?: { flagged: boolean; flag_source: "threshold" | "manual" | null; flagged_at: string | null };
+    } = {},
   ): void {
     const at = nowFn();
     const before = item.quantity;
@@ -299,6 +401,16 @@ export function createStore(
       item.flag_source = null;
       item.flagged_at = null;
     }
+    // Undo path: the caller captured these three fields as they stood BEFORE
+    // the write being undone. They override the transition above — a
+    // compensating recount must put back what the original write changed (a
+    // purchase's clear, a crossing's raise), not re-derive flag state from a
+    // movement the user just retracted.
+    if (opts.restoreFlags !== undefined) {
+      item.flagged = opts.restoreFlags.flagged;
+      item.flag_source = opts.restoreFlags.flag_source;
+      item.flagged_at = opts.restoreFlags.flagged_at;
+    }
     // recount-family only, and NOT the undo compensator: the caller decides.
     if (opts.stampVerified === true) item.verified_at = at;
     item.updated_at = at;
@@ -315,6 +427,10 @@ export function createStore(
     },
 
     bootStatus: () => status,
+
+    saveError: () => saveFailed,
+
+    storageConflict: () => conflict,
 
     lastQuantityWrite() {
       // Pure scan over the log, newest first — no extra state to persist or
@@ -404,6 +520,11 @@ export function createStore(
       const item = itemById(id);
       if (item.deleted_at === null) return;
       item.deleted_at = null;
+      // A merge-loser's pointer must not survive restoration: while it
+      // stands, ALL the item's history — past and future — keeps resolving
+      // to the merge survivor, and a later reverse merge would create a
+      // merged_into cycle between the pair.
+      item.merged_into = null;
       commitQuantity(item, item.quantity, "restore");
     },
 
@@ -429,11 +550,13 @@ export function createStore(
       commitQuantity(item, item.quantity + (amount ?? item.restock_amount), "purchase");
     },
 
-    undoQuantity(itemId, qtyBefore) {
+    undoQuantity(itemId, qtyBefore, restoreFlags) {
       const item = itemById(itemId);
       // Compensating recount, NOT a human observation: no verified_at stamp
-      // (the human confirmed nothing — they retracted a tap).
-      commitQuantity(item, qtyBefore, "recount");
+      // (the human confirmed nothing — they retracted a tap). restoreFlags,
+      // when the caller captured it, rides in the same commit so undo also
+      // reverses flag changes the retracted write made.
+      commitQuantity(item, qtyBefore, "recount", { restoreFlags });
     },
 
     // -- flags --------------------------------------------------------------
@@ -523,6 +646,19 @@ export function createStore(
       commitQuantity(item, plan.quantity, "unit_change", { note });
     },
 
+    clearPackageSize(id) {
+      const item = itemById(id);
+      const before = item.package_size;
+      // Nothing to clear: minting a "package none -> none" event is noise.
+      if (before === null) return;
+      const note = `package ${before.amount} ${before.unit} -> none`;
+      item.package_size = null;
+      // Quantity and threshold are untouched — dropping the package changes
+      // no numbers, only the bag<->contents bookkeeping. The unit string is
+      // unchanged too, so no unit_before; the note carries the change.
+      commitQuantity(item, item.quantity, "unit_change", { note });
+    },
+
     // -- merge --------------------------------------------------------------
     mergeItems(survivorId, loserId, resolvedQty) {
       const survivor = itemById(survivorId);
@@ -597,24 +733,43 @@ export function createStore(
     },
 
     importReplace(newDoc) {
+      // The clobber guard gates imports like any other persist: overwriting
+      // a doc another context wrote destroys that context's data just the
+      // same whether the bytes came from a mutation or an import file.
+      if (!storageStillOurs()) return { ok: false };
+      const at = nowFn();
+      const reason = `pre-import-${at}`;
       try {
-        const at = nowFn();
-        const reason = `pre-import-${at}`;
         // Snapshot the IN-MEMORY doc (it may be ahead of storage inside the
         // debounce window) — the import gate's promised escape hatch.
         writeSnapshot(adapter, reason, JSON.stringify(doc));
-        doc = newDoc;
-        dirty = true;
-        // Replace persists immediately: a wholesale swap must not sit in a
-        // 100 ms window where a page kill leaves the OLD doc on disk under
+        // Persist FIRST, swap only on success: if this write throws (quota),
+        // the app must keep running on the doc storage still holds — never
+        // on an in-memory imported doc that a later debounced save would
+        // silently persist behind an "import failed" message. And replace
+        // persists immediately regardless: a wholesale swap must not sit in
+        // a 100 ms window where a page kill leaves the OLD doc on disk under
         // the user's belief they restored.
-        flushNow();
-        notify();
-        return { ok: true, snapshotKey: SNAPSHOT_PREFIX + reason };
+        const raw = JSON.stringify(newDoc);
+        adapter.set(DOC_KEY, raw);
+        lastKnownRaw = raw;
       } catch {
-        // Snapshot or save failed (e.g. quota): the current doc stands.
+        // Snapshot or save failed (e.g. quota): memory AND storage stand
+        // untouched — the running app and the persisted doc still agree.
         return { ok: false };
       }
+      doc = newDoc;
+      // Reset save tracking: storage now holds exactly this doc, so nothing
+      // is dirty, a pending debounce would only re-save it, and any earlier
+      // quota failure was just superseded by a successful write.
+      if (saveTimer !== null) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+      dirty = false;
+      saveFailed = false;
+      notify();
+      return { ok: true, snapshotKey: SNAPSHOT_PREFIX + reason };
     },
 
     prune() {
@@ -628,6 +783,37 @@ export function createStore(
     },
 
     flush: flushNow,
+
+    listSnapshots() {
+      // Snapshot names embed ISO timestamps (pre-import-<iso>, corrupt-<iso>),
+      // so a descending lexicographic sort is newest-first for those; the few
+      // undated keys (pre-migrate-vN) simply sort among them.
+      return adapter
+        .keys()
+        .filter((k) => k.startsWith(SNAPSHOT_PREFIX))
+        .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+        .map((key) => ({
+          key,
+          // UTF-8 size — what a shared/downloaded copy of the text weighs.
+          bytes: new TextEncoder().encode(adapter.get(key) ?? "").length,
+        }));
+    },
+
+    snapshotText(key) {
+      // Prefix-guarded so the snapshot API can never become a general
+      // storage peephole (the live doc has getDoc()).
+      if (!key.startsWith(SNAPSHOT_PREFIX)) return null;
+      return adapter.get(key);
+    },
+
+    deleteSnapshot(key) {
+      // Prefix-guarded: this must never be able to remove the live doc.
+      if (!key.startsWith(SNAPSHOT_PREFIX)) return;
+      adapter.remove(key);
+      // Storage housekeeping, not a doc mutation: no event, nothing dirty,
+      // writes_since_export untouched. Notify so snapshot lists re-read.
+      notify();
+    },
 
     updateSettings(fields) {
       if (fields.retention_days !== undefined) doc.settings.retention_days = fields.retention_days;

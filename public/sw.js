@@ -1,21 +1,33 @@
 /*
- * Ambry service worker — hand-written, ~50 lines, no Workbox (PLAN.md §3).
+ * Ambry service worker — hand-written, no Workbox (PLAN.md §3).
  *
- * Strategy: cache-first for everything (instant launch on flaky supermarket
- * LTE — network-first would hang the aisle test on one bar), with background
- * revalidation of navigations so the cache tracks the deployed app. A new
- * deploy bumps SW_VERSION (via the build stamp below), which installs a fresh
- * cache; the app shows an "Update ready" pill when a new worker is waiting
- * (registration.waiting) and calls skipWaiting on tap.
+ * Update lifecycle (how a deploy reaches the phone):
+ *   1. `npm run build` runs scripts/stamp-sw.mjs after `vite build`. It
+ *      rewrites SW_VERSION below to a content hash of the built shell and
+ *      PRECACHE to the full built asset list — so any deploy that changes
+ *      the app also changes this file's bytes.
+ *   2. The browser re-fetches /sw.js on navigation; changed bytes install a
+ *      new worker, whose install step precaches the NEW shell (HTML + hashed
+ *      assets, atomically) into a NEW versioned cache. It then sits waiting.
+ *   3. sw-client.ts spots the waiting worker; the App shows the "Update
+ *      ready" pill; tapping it posts SKIP_WAITING.
+ *   4. The new worker activates, deletes old caches, claims the clients; the
+ *      page reloads once (controllerchange) into the new precached shell.
  *
- * SW_VERSION: bump manually on each deploy, or wire the build to stamp it.
+ * Fetch strategy: cache-first, no background revalidation. Refreshing "/"
+ * behind the scenes (the old stale-while-revalidate) could pair new HTML
+ * with hashed assets that were never cached — a white screen on the next
+ * offline standalone launch. HTML and its assets now move only together,
+ * via the versioned precache above.
+ *
+ * SW_VERSION and PRECACHE are placeholders; the build stamp rewrites both.
  */
-const SW_VERSION = "v1";
+const SW_VERSION = "dev";
+const PRECACHE = ["/"];
 const CACHE = `ambry-${SW_VERSION}`;
-const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(PRECACHE)));
 });
 
 self.addEventListener("activate", (e) => {
@@ -31,24 +43,18 @@ self.addEventListener("message", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET" || !req.url.startsWith(self.location.origin)) return;
-  // Navigations: serve cached shell instantly, revalidate in the background.
-  const isNav = req.mode === "navigate";
-  const key = isNav ? "/" : req;
+  // Navigations serve the precached shell; everything else its own URL.
+  const key = req.mode === "navigate" ? "/" : req;
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(key);
-      const refresh = fetch(req)
-        .then((res) => {
-          if (res.ok) cache.put(key, res.clone());
-          return res;
-        })
-        .catch(() => undefined);
-      if (cached) {
-        e.waitUntil(refresh); // stale-while-revalidate
-        return cached;
-      }
-      const fresh = await refresh;
-      return fresh ?? Response.error();
+      if (cached) return cached;
+      // Miss — a request outside the precache (or a failed precache): go to
+      // the network and keep the answer so next launch is offline-safe.
+      const fresh = await fetch(req).catch(() => undefined);
+      if (fresh === undefined) return Response.error();
+      if (fresh.ok) cache.put(key, fresh.clone());
+      return fresh;
     }),
   );
 });

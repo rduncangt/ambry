@@ -3,7 +3,7 @@
  * run at load AND at import through the same pipeline — so a 2026 export
  * imports cleanly into the 2030 app. NEVER delete a migration function.
  */
-import { SCHEMA_VERSION, type AmbryDoc } from "../types";
+import { DEFAULT_RETENTION_DAYS, SCHEMA_VERSION, type AmbryDoc } from "../types";
 
 export class NewerSchemaError extends Error {
   constructor(public fileVersion: number) {
@@ -21,6 +21,13 @@ export const MIGRATIONS: Record<number, (raw: Record<string, unknown>) => Record
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Finite integer >= min, or null when the value cannot be read as one. */
+function coerceIntAtLeast(v: unknown, min: number): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
+  const int = Math.floor(v);
+  return int >= min ? int : null;
 }
 
 /**
@@ -73,6 +80,20 @@ export function migrateDoc(raw: unknown): AmbryDoc {
   }
   if (!isPlainObject(doc.settings)) {
     throw new InvalidDocError('Missing or non-object "settings"');
+  }
+
+  // Coerce the settings numerics arithmetic depends on. A hand-edited backup
+  // with a missing or garbage retention_days would make pruneDoc's cutoff
+  // NaN — every date comparison goes false and history is silently dropped
+  // or kept wholesale. Fallbacks, not errors: a backup must never be
+  // rejected over a tunable.
+  const settings = doc.settings;
+  const retention = coerceIntAtLeast(settings.retention_days, 1) ?? DEFAULT_RETENTION_DAYS;
+  const writes = coerceIntAtLeast(settings.writes_since_export, 0) ?? 0;
+  if (settings.retention_days !== retention || settings.writes_since_export !== writes) {
+    // Copy, don't mutate: migrateDoc is pure, and when no migration ran
+    // `doc` is still the caller's own object.
+    doc = { ...doc, settings: { ...settings, retention_days: retention, writes_since_export: writes } };
   }
   return doc as unknown as AmbryDoc;
 }
