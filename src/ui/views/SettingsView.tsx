@@ -3,17 +3,17 @@
  * the durability system), then the reconcile entry, install status,
  * housekeeping, and about. Every write goes through Store commands
  * (AGENTS.md rule 1); import is the gated whole-file REPLACE with the
- * §1.3 staleness guard.
+ * §1.3 staleness guard — and snapshot restores reuse the same gate.
  */
 import { useState } from "preact/hooks";
 import { checkStaleness, parseImport, type StalenessCheck } from "../../domain/exportImport";
 import { fmtAge } from "../../domain/format";
-import { SNAPSHOT_PREFIX, localStorageAdapter } from "../../store/adapter";
-import { liveItems } from "../../store/selectors";
+import { SNAPSHOT_PREFIX } from "../../store/adapter";
+import { STALE_DAYS, liveItems, staleCount } from "../../store/selectors";
 import { now, type AmbryDoc } from "../../types";
 import { APP_VERSION } from "../../version";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
-import { exportFlow, pickFile, readText } from "../share";
+import { doExportWithToast, pickFile, readText } from "../share";
 import { isIOS, isStandalone } from "../sw-client";
 import "./settings.css";
 
@@ -31,77 +31,82 @@ export function SettingsView() {
 }
 
 // ---------------------------------------------------------------------------
-// Backup — export via share sheet, gated import
+// The gated import/restore flow (shared by Backup and snapshot Restore)
 // ---------------------------------------------------------------------------
 
-/** A picked backup file, parsed and staleness-checked, awaiting the go-ahead. */
+/** Parsed candidate data (backup file or on-device snapshot), staleness-checked, awaiting the go-ahead. */
 interface PendingImport {
+  /** Card heading naming where these bytes came from. */
+  title: string;
   doc: AmbryDoc;
-  exportedAt: string | null;
   deviceLabel: string | null;
   counts: { items: number; events: number; extras: number };
   staleness: StalenessCheck;
 }
 
-/** Typed-confirm word for importing a backup OLDER than local data (§1.3). */
+/** Typed-confirm word for importing data OLDER than local (§1.3). */
 const STALE_CONFIRM_WORD = "REPLACE";
 
-function BackupSection() {
-  const store = useStore();
-  const doc = useDoc();
-  const toast = useToast();
-  const [pending, setPending] = useState<PendingImport | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [confirmText, setConfirmText] = useState("");
-
-  const nowIso = now();
-  const settings = doc.settings;
-
-  async function doExport(): Promise<void> {
-    const result = await exportFlow(store);
-    if (result === "shared") toast("Backup exported");
-    else if (result === "downloaded") toast("Backup downloaded");
-    else toast("Export cancelled — no backup was made");
-  }
-
-  async function chooseImport(): Promise<void> {
-    setError(null);
-    setPending(null);
-    setConfirmText("");
-    const file = await pickFile("application/json,.json,text/plain");
-    if (file === null) return;
-    const text = await readText(file);
-    const parsed = parseImport(text);
-    if (!parsed.ok) {
-      // Plain words, not error codes: "newer_schema" means THIS app is the
-      // stale half of the pair.
-      setError(
-        parsed.error === "newer_schema"
-          ? "This backup was made by a newer version of Ambry — update the app first, then import it."
-          : `That file could not be read as an Ambry backup. (${parsed.detail})`,
-      );
-      return;
-    }
-    setPending({
+/**
+ * Parse text into a PendingImport with the §1.3 staleness check. `title`
+ * overrides the default backup-file heading (snapshot restores name the
+ * snapshot instead). Callers word their own failure message from the error.
+ */
+function parsePending(
+  text: string,
+  localDoc: AmbryDoc,
+  title: string | null,
+): { ok: true; pending: PendingImport } | { ok: false; error: "invalid" | "newer_schema"; detail: string } {
+  const parsed = parseImport(text);
+  if (!parsed.ok) return { ok: false, error: parsed.error, detail: parsed.detail };
+  return {
+    ok: true,
+    pending: {
+      title:
+        title ??
+        (parsed.envelope.exported_at !== null
+          ? `Backup from ${new Date(parsed.envelope.exported_at).toLocaleString()}`
+          : "Backup (no export date)"),
       doc: parsed.doc,
-      exportedAt: parsed.envelope.exported_at,
       deviceLabel: parsed.envelope.device_label,
       counts: parsed.envelope.counts,
-      staleness: checkStaleness(store.getDoc(), parsed.doc),
-    });
-  }
+      staleness: checkStaleness(localDoc, parsed.doc),
+    },
+  };
+}
+
+/**
+ * THE preview/confirm card for every whole-file REPLACE: counts on both
+ * sides, the loud older-than-local guard with its typed override, then
+ * importReplace (which snapshots current data first). One component so a
+ * snapshot restore can never grow a laxer gate than a file import.
+ */
+function ImportPreview(props: {
+  pending: PendingImport;
+  onCancel: () => void;
+  /** Called INSTEAD of success handling when the replace could not persist. */
+  onError: (message: string) => void;
+}) {
+  const store = useStore();
+  const doc = useDoc();
+  const [confirmText, setConfirmText] = useState("");
+  const pending = props.pending;
+  const nowIso = now();
 
   const staleOverrideOk = confirmText.trim().toUpperCase() === STALE_CONFIRM_WORD;
 
+  const localeOrNone = (iso: string | null): string =>
+    iso === null ? "none" : new Date(iso).toLocaleString();
+
   function doReplace(): void {
-    if (pending === null) return;
     // Belt and braces: the button is disabled too, but a stale import must
     // never slip through without the typed override.
     if (pending.staleness.incomingIsOlder && !staleOverrideOk) return;
     const outcome = store.importReplace(pending.doc);
     if (!outcome.ok) {
-      setPending(null);
-      setError("Import failed — the backup could not be saved on this device. Your current data is unchanged.");
+      props.onError(
+        "Import failed — the data could not be saved on this device. Your current data is unchanged.",
+      );
       return;
     }
     // Whole-doc swap: every mounted view holds state derived from the old
@@ -110,8 +115,95 @@ function BackupSection() {
     window.location.reload();
   }
 
-  const localeOrNone = (iso: string | null): string =>
-    iso === null ? "none" : new Date(iso).toLocaleString();
+  return (
+    <div class="settings-import-card">
+      <div>
+        <div class="row-title">{pending.title}</div>
+        {pending.deviceLabel !== null && pending.deviceLabel !== "" && (
+          <div class="row-sub">Device: {pending.deviceLabel}</div>
+        )}
+        <div class="row-sub">
+          {pending.counts.items} items · {pending.counts.events} events ·{" "}
+          {pending.counts.extras} extras
+        </div>
+      </div>
+      <div>
+        <div class="row-title">Replaces current data</div>
+        <div class="row-sub">
+          {doc.items.length} items · {doc.events.length} events · {doc.extras.length} extras
+          — last edited {fmtAge(pending.staleness.localLatest, nowIso)}
+        </div>
+      </div>
+      {pending.staleness.incomingIsOlder && (
+        <div class="settings-import-stale" role="alert">
+          <strong>This data is OLDER than the data on this phone.</strong>
+          <span>
+            Newest edit in it: {localeOrNone(pending.staleness.incomingLatest)}. On this
+            phone: {localeOrNone(pending.staleness.localLatest)}. Importing it throws away
+            everything entered since. Type {STALE_CONFIRM_WORD} to allow it.
+          </span>
+          <input
+            class="field-input"
+            type="text"
+            autocomplete="off"
+            aria-label={`Type ${STALE_CONFIRM_WORD} to confirm`}
+            placeholder={STALE_CONFIRM_WORD}
+            value={confirmText}
+            onInput={(e) => setConfirmText(e.currentTarget.value)}
+          />
+        </div>
+      )}
+      <p class="settings-note">
+        A snapshot of the current data is kept on this device before anything is replaced.
+      </p>
+      <button
+        class={`btn btn-big ${pending.staleness.incomingIsOlder ? "btn-danger" : "btn-primary"}`}
+        type="button"
+        disabled={pending.staleness.incomingIsOlder && !staleOverrideOk}
+        onClick={doReplace}
+      >
+        Replace current data
+      </button>
+      <button class="btn" type="button" onClick={props.onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Backup — export via share sheet, gated import
+// ---------------------------------------------------------------------------
+
+function BackupSection() {
+  const store = useStore();
+  const doc = useDoc();
+  const toast = useToast();
+  const [pending, setPending] = useState<PendingImport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const nowIso = now();
+  const settings = doc.settings;
+
+  async function chooseImport(): Promise<void> {
+    setError(null);
+    setPending(null);
+    const file = await pickFile("application/json,.json,text/plain");
+    if (file === null) return;
+    const text = await readText(file);
+    const outcome = parsePending(text, store.getDoc(), null);
+    if (!outcome.ok) {
+      // Plain words, not error codes: "newer_schema" means THIS app is the
+      // stale half of the pair.
+      setError(
+        outcome.error === "newer_schema"
+          ? "This backup was made by a newer version of Ambry — update the app first, then import it."
+          : `That file could not be read as an Ambry backup. (${outcome.detail})`,
+      );
+      return;
+    }
+    setPending(outcome.pending);
+  }
 
   return (
     <section class="settings-section">
@@ -128,7 +220,11 @@ function BackupSection() {
         Data since the last export is unprotected; the nag threshold bounds that window.
       </p>
       <div class="settings-stack">
-        <button class="btn btn-primary btn-big" type="button" onClick={() => void doExport()}>
+        <button
+          class="btn btn-primary btn-big"
+          type="button"
+          onClick={() => void doExportWithToast(store, toast)}
+        >
           Export backup
         </button>
         <p class="settings-note">
@@ -142,69 +238,14 @@ function BackupSection() {
         )}
         {error !== null && <p class="settings-error">{error}</p>}
         {pending !== null && (
-          <div class="settings-import-card">
-            <div>
-              <div class="row-title">
-                {pending.exportedAt !== null
-                  ? `Backup from ${new Date(pending.exportedAt).toLocaleString()}`
-                  : "Backup (no export date)"}
-              </div>
-              {pending.deviceLabel !== null && pending.deviceLabel !== "" && (
-                <div class="row-sub">Device: {pending.deviceLabel}</div>
-              )}
-              <div class="row-sub">
-                {pending.counts.items} items · {pending.counts.events} events ·{" "}
-                {pending.counts.extras} extras
-              </div>
-            </div>
-            <div>
-              <div class="row-title">Replaces current data</div>
-              <div class="row-sub">
-                {doc.items.length} items · {doc.events.length} events · {doc.extras.length}{" "}
-                extras — last edited {fmtAge(pending.staleness.localLatest, nowIso)}
-              </div>
-            </div>
-            {pending.staleness.incomingIsOlder && (
-              <div class="settings-import-stale" role="alert">
-                <strong>This backup is OLDER than the data on this phone.</strong>
-                <span>
-                  Newest edit in the file: {localeOrNone(pending.staleness.incomingLatest)}. On
-                  this phone: {localeOrNone(pending.staleness.localLatest)}. Importing it throws
-                  away everything entered since. Type {STALE_CONFIRM_WORD} to allow it.
-                </span>
-                <input
-                  class="field-input"
-                  type="text"
-                  autocomplete="off"
-                  aria-label={`Type ${STALE_CONFIRM_WORD} to confirm`}
-                  placeholder={STALE_CONFIRM_WORD}
-                  value={confirmText}
-                  onInput={(e) => setConfirmText(e.currentTarget.value)}
-                />
-              </div>
-            )}
-            <p class="settings-note">
-              A snapshot of the current data is kept on this device before anything is replaced.
-            </p>
-            <button
-              class={`btn btn-big ${pending.staleness.incomingIsOlder ? "btn-danger" : "btn-primary"}`}
-              type="button"
-              disabled={pending.staleness.incomingIsOlder && !staleOverrideOk}
-              onClick={doReplace}
-            >
-              Replace current data
-            </button>
-            <button
-              class="btn"
-              type="button"
-              onClick={() => {
-                setPending(null);
-                setConfirmText("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
+          <ImportPreview
+            pending={pending}
+            onCancel={() => setPending(null)}
+            onError={(message) => {
+              setPending(null);
+              setError(message);
+            }}
+          />
         )}
       </div>
     </section>
@@ -215,20 +256,12 @@ function BackupSection() {
 // Reconcile entry
 // ---------------------------------------------------------------------------
 
-/** UI-level hint only: how old an unconfirmed item counts as "stale" for the
- *  count beside the reconcile entry. Reconcile itself just sorts
- *  stalest-first — this number decides nothing in the domain. */
-const STALE_HINT_DAYS = 30;
-const DAY_MS = 86_400_000;
-
 function ReconcileSection() {
   const doc = useDoc();
   const nav = useNav();
-  const nowMs = Date.parse(now());
-  const staleCount = liveItems(doc).filter(
-    (i) =>
-      i.verified_at === null || nowMs - Date.parse(i.verified_at) >= STALE_HINT_DAYS * DAY_MS,
-  ).length;
+  // The canonical staleness rule (selectors.staleCount) — the same count the
+  // pantry's stale line shows, so the two nudges can never disagree.
+  const stale = staleCount(doc, now());
 
   return (
     <section class="settings-section">
@@ -238,9 +271,9 @@ function ReconcileSection() {
           Walk the shelves
         </button>
         <p class="settings-note">
-          {staleCount === 0
-            ? `Every item was confirmed within the last ${STALE_HINT_DAYS} days.`
-            : `${staleCount} item${staleCount === 1 ? "" : "s"} not confirmed in ${STALE_HINT_DAYS}+ days — a two-minute pass keeps the counts honest.`}
+          {stale === 0
+            ? `Every item was confirmed within the last ${STALE_DAYS} days.`
+            : `${stale} item${stale === 1 ? "" : "s"} not confirmed in ${STALE_DAYS}+ days — a two-minute pass keeps the counts honest.`}
         </p>
       </div>
     </section>
@@ -282,45 +315,16 @@ function InstallSection() {
 // Housekeeping
 // ---------------------------------------------------------------------------
 
-interface SnapshotInfo {
-  key: string;
-  text: string;
-  sizeKb: number;
-}
-
-/**
- * Read-only snapshot listing. The Store exposes no snapshot API, so this
- * reads through the adapter module directly — the one sanctioned storage
- * seam (R3). Display only: nothing here writes. try/catch because storage
- * access itself can throw (private mode, blocked site data).
- */
-function listSnapshots(): SnapshotInfo[] {
-  try {
-    const adapter = localStorageAdapter();
-    return adapter
-      .keys()
-      .filter((k) => k.startsWith(SNAPSHOT_PREFIX))
-      .sort()
-      .reverse() // reasons embed ISO timestamps, so string order ≈ newest first
-      .map((key) => {
-        const reason = key.slice(SNAPSHOT_PREFIX.length);
-        return {
-          key,
-          text: snapshotLabel(reason),
-          sizeKb: Math.max(1, Math.round((adapter.get(key) ?? "").length / 1024)),
-        };
-      });
-  } catch {
-    return [];
-  }
-}
-
-/** "pre-import-<iso>" gets a human date; other reasons (pre-migrate-vN) show raw. */
-function snapshotLabel(reason: string): string {
-  const m = reason.match(/^pre-import-(.+)$/);
+/** "pre-import-<iso>"/"corrupt-<iso>" get a human date; other reasons (pre-migrate-vN) show raw. */
+function snapshotLabel(key: string): string {
+  const reason = key.slice(SNAPSHOT_PREFIX.length);
+  const m = reason.match(/^(pre-import|corrupt)-(.+)$/);
   if (m !== null) {
-    const t = Date.parse(m[1] ?? "");
-    if (Number.isFinite(t)) return `Before import — ${new Date(t).toLocaleString()}`;
+    const t = Date.parse(m[2] ?? "");
+    if (Number.isFinite(t)) {
+      const when = new Date(t).toLocaleString();
+      return m[1] === "corrupt" ? `Damaged data — ${when}` : `Before import — ${when}`;
+    }
   }
   return reason;
 }
@@ -333,6 +337,10 @@ function HousekeepingSection() {
   // reference is stable (store mutates in place), so no resync effect needed.
   const [retention, setRetention] = useState(() => String(doc.settings.retention_days));
   const [label, setLabel] = useState(() => doc.settings.device_label);
+  // Snapshot-restore flow state: the pending card renders next to the list,
+  // through the SAME gated ImportPreview the backup import uses.
+  const [snapPending, setSnapPending] = useState<PendingImport | null>(null);
+  const [snapError, setSnapError] = useState<string | null>(null);
 
   function commitRetention(): void {
     const n = Number(retention.trim());
@@ -369,7 +377,89 @@ function HousekeepingSection() {
     toast(parts.length === 0 ? "Nothing to prune" : `Pruned ${parts.join(" and ")}`);
   }
 
-  const snapshots = listSnapshots();
+  // -- snapshot actions -----------------------------------------------------
+  // On an installed iPhone this list is the ONLY way to reach these bytes —
+  // BootScreen promises "nothing was destroyed", so a snapshot must be
+  // shareable (raw bytes off-device, even when too damaged to parse),
+  // restorable (through the gated import), and deletable (frees quota).
+
+  async function shareSnapshot(key: string): Promise<void> {
+    const text = store.snapshotText(key);
+    if (text === null) {
+      setSnapError("That snapshot is no longer in storage.");
+      return;
+    }
+    // Named after the key so a folder of shared snapshots stays traceable to
+    // what each one was. application/json even for corrupt stashes — the
+    // receiver decides what to make of the bytes.
+    const file = new File([text], `${key}.json`, { type: "application/json" });
+    if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] }) === true) {
+      try {
+        await navigator.share({ files: [file] });
+        toast("Snapshot shared");
+        return;
+      } catch (e) {
+        // AbortError = the user closed the sheet: nothing left the device.
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        // Any other share failure: fall through to the download path below.
+      }
+    }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Revoke later, not synchronously — some engines abort the save if the
+    // URL dies before the download pipeline picks it up.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    toast("Snapshot downloaded");
+  }
+
+  function restoreSnapshot(key: string): void {
+    setSnapError(null);
+    setSnapPending(null);
+    const text = store.snapshotText(key);
+    if (text === null) {
+      setSnapError("That snapshot is no longer in storage.");
+      return;
+    }
+    const outcome = parsePending(text, store.getDoc(), `Snapshot: ${snapshotLabel(key)}`);
+    if (!outcome.ok) {
+      // A corrupt stash may genuinely not parse — Share still gets the raw
+      // bytes off the device for repair elsewhere.
+      setSnapError(
+        outcome.error === "newer_schema"
+          ? "This snapshot was written by a newer version of Ambry — update the app first."
+          : `This snapshot can't be restored directly (${outcome.detail}). Share it to move the raw bytes off this phone.`,
+      );
+      return;
+    }
+    setSnapPending(outcome.pending);
+  }
+
+  function deleteSnapshot(key: string): void {
+    const ok = window.confirm(
+      `Delete the snapshot "${snapshotLabel(key)}"? This frees storage and cannot be undone.`,
+    );
+    if (!ok) return;
+    store.deleteSnapshot(key);
+    setSnapPending(null);
+    setSnapError(null);
+    toast("Snapshot deleted");
+  }
+
+  // All snapshot access goes through the Store's read-only snapshot API —
+  // the UI never touches the storage adapter (AGENTS.md rule 1's spirit).
+  let snapshots: { key: string; bytes: number }[];
+  try {
+    snapshots = store.listSnapshots();
+  } catch {
+    // Storage access itself can throw (private mode, blocked site data);
+    // an empty list beats a crashed More tab.
+    snapshots = [];
+  }
 
   return (
     <section class="settings-section">
@@ -420,14 +510,44 @@ function HousekeepingSection() {
           <div>
             <div class="settings-field-label">Snapshots on this device</div>
             {snapshots.map((s) => (
-              <div class="settings-kv" key={s.key}>
-                <span class="settings-kv-label">{s.text}</span>
-                <span>{s.sizeKb} KB</span>
+              <div class="settings-snap" key={s.key}>
+                <div class="settings-kv">
+                  <span class="settings-kv-label">{snapshotLabel(s.key)}</span>
+                  <span>{Math.max(1, Math.round(s.bytes / 1024))} KB</span>
+                </div>
+                <div class="settings-snap-acts">
+                  <button class="btn" type="button" onClick={() => void shareSnapshot(s.key)}>
+                    Share…
+                  </button>
+                  <button class="btn" type="button" onClick={() => restoreSnapshot(s.key)}>
+                    Restore…
+                  </button>
+                  <button
+                    class="btn settings-snap-delete"
+                    type="button"
+                    onClick={() => deleteSnapshot(s.key)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             ))}
+            {snapError !== null && <p class="settings-error">{snapError}</p>}
+            {snapPending !== null && (
+              <ImportPreview
+                pending={snapPending}
+                onCancel={() => setSnapPending(null)}
+                onError={(message) => {
+                  setSnapPending(null);
+                  setSnapError(message);
+                }}
+              />
+            )}
             <p class="settings-note">
-              Automatic copies taken before imports and migrations. They live in this
-              browser's storage only — they are not backups and die with the device.
+              Automatic copies taken before imports and migrations, or when damaged data was
+              found at launch. They live in this browser's storage only — share one to get
+              its raw bytes off the device, restore to make it the live data (gated like any
+              import), delete to free space.
             </p>
           </div>
         )}

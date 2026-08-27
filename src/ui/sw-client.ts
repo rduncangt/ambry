@@ -57,12 +57,7 @@ export function registerSW(onUpdateReady: UpdateListener): void {
   container
     .register("/sw.js")
     .then((reg) => {
-      if (reg.waiting !== null && container.controller !== null) {
-        onUpdateReady(makeApply(reg.waiting));
-      }
-      reg.addEventListener("updatefound", () => {
-        const installing = reg.installing;
-        if (installing === null) return;
+      const watchInstalling = (installing: ServiceWorker): void => {
         installing.addEventListener("statechange", () => {
           // "installed" with an existing controller = an update is waiting.
           // Without a controller it is the FIRST install — nothing to offer.
@@ -70,6 +65,16 @@ export function registerSW(onUpdateReady: UpdateListener): void {
             onUpdateReady(makeApply(installing));
           }
         });
+      };
+      if (reg.waiting !== null && container.controller !== null) {
+        onUpdateReady(makeApply(reg.waiting));
+      }
+      // updatefound can fire before register() resolves and this listener
+      // attaches; a worker already mid-install would then never be watched.
+      // reg.installing covers that window.
+      if (reg.installing !== null) watchInstalling(reg.installing);
+      reg.addEventListener("updatefound", () => {
+        if (reg.installing !== null) watchInstalling(reg.installing);
       });
     })
     .catch(() => {

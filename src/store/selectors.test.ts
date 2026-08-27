@@ -9,10 +9,13 @@ import {
 } from "../types";
 import { emptyDoc } from "./doc";
 import {
+  STALE_DAYS,
   exportNag,
   groupedInventory,
   liveItems,
+  resolveVocabValue,
   shoppingList,
+  staleCount,
   stalest,
   valuesInUse,
   type ExportNagLevel,
@@ -254,6 +257,64 @@ describe("stalest", () => {
     const doc = makeDoc({ items: [pantryOld, fridge, pantryNever, nowhere] });
     expect(stalest(doc, "pantry")).toEqual([pantryNever, pantryOld]);
     expect(stalest(doc)).toHaveLength(4);
+  });
+});
+
+describe("staleCount", () => {
+  const iso = (msBeforeNow: number): string => new Date(Date.parse(NOW) - msBeforeNow).toISOString();
+
+  it("counts live items whose verified_at is more than STALE_DAYS old", () => {
+    const stale = makeItem({ verified_at: iso((STALE_DAYS + 1) * DAY_MS) });
+    const fresh = makeItem({ verified_at: iso(1 * DAY_MS) });
+    const doc = makeDoc({ items: [stale, fresh] });
+    expect(staleCount(doc, NOW)).toBe(1);
+  });
+
+  it("an item verified exactly STALE_DAYS ago is not yet stale (strictly more than)", () => {
+    const doc = makeDoc({ items: [makeItem({ verified_at: iso(STALE_DAYS * DAY_MS) })] });
+    expect(staleCount(doc, NOW)).toBe(0);
+  });
+
+  it("never-verified items fall back to created_at — a fresh pantry is not instantly stale", () => {
+    const seededToday = makeItem({ verified_at: null, created_at: iso(0) });
+    const seededLongAgo = makeItem({ verified_at: null, created_at: iso((STALE_DAYS + 5) * DAY_MS) });
+    const doc = makeDoc({ items: [seededToday, seededLongAgo] });
+    expect(staleCount(doc, NOW)).toBe(1);
+  });
+
+  it("verified_at wins over an old created_at", () => {
+    // Created ages ago but confirmed yesterday: not stale.
+    const doc = makeDoc({
+      items: [makeItem({ created_at: iso(100 * DAY_MS), verified_at: iso(1 * DAY_MS) })],
+    });
+    expect(staleCount(doc, NOW)).toBe(0);
+  });
+
+  it("ignores soft-deleted items", () => {
+    const doc = makeDoc({
+      items: [makeItem({ verified_at: iso(100 * DAY_MS), deleted_at: NOW })],
+    });
+    expect(staleCount(doc, NOW)).toBe(0);
+  });
+});
+
+describe("resolveVocabValue", () => {
+  it("returns the EXISTING casing on a case-insensitive match", () => {
+    expect(resolveVocabValue(["fridge", "pantry"], "Fridge")).toBe("fridge");
+    expect(resolveVocabValue(["Baking", "spices"], "baking")).toBe("Baking");
+  });
+
+  it("trims before matching (iOS keyboards add trailing spaces too)", () => {
+    expect(resolveVocabValue(["fridge"], "  FRIDGE  ")).toBe("fridge");
+  });
+
+  it("returns the trimmed typed value when nothing matches", () => {
+    expect(resolveVocabValue(["fridge", "pantry"], "  Freezer ")).toBe("Freezer");
+    expect(resolveVocabValue([], "garage")).toBe("garage");
+  });
+
+  it("an exact match round-trips unchanged", () => {
+    expect(resolveVocabValue(["fridge"], "fridge")).toBe("fridge");
   });
 });
 

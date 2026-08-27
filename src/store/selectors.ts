@@ -112,6 +112,40 @@ export function valuesInUse(doc: AmbryDoc, field: "category" | "location" | "uni
   return [...values].sort(alpha);
 }
 
+/** An item is "stale" once its last observation is more than this many days old. */
+export const STALE_DAYS = 30;
+
+/**
+ * The canonical staleness rule: live items whose last human observation is
+ * more than STALE_DAYS days before nowIso. Never-verified items fall back to
+ * created_at — a freshly seeded pantry is not instantly "stale"; items age
+ * INTO the reconcile nudge instead.
+ */
+export function staleCount(doc: AmbryDoc, nowIso: string): number {
+  const staleBefore = Date.parse(nowIso) - STALE_DAYS * DAY_MS;
+  let count = 0;
+  for (const item of doc.items) {
+    if (item.deleted_at !== null) continue;
+    if (Date.parse(item.verified_at ?? item.created_at) < staleBefore) count++;
+  }
+  return count;
+}
+
+/**
+ * Resolve a typed vocabulary value (category/location/unit) against the
+ * values already in use: a case-insensitive match returns the EXISTING
+ * casing, otherwise the trimmed typed value stands. Guards against iOS
+ * auto-capitalization minting "Fridge" as a second location beside "fridge".
+ */
+export function resolveVocabValue(existing: string[], typed: string): string {
+  const t = typed.trim();
+  const lower = t.toLowerCase();
+  for (const value of existing) {
+    if (value.toLowerCase() === lower) return value;
+  }
+  return t;
+}
+
 /** Stalest-first for the reconcile flow: live items by verified_at ascending (nulls first). */
 export function stalest(doc: AmbryDoc, location?: string): Item[] {
   return doc.items

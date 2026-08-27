@@ -19,22 +19,6 @@ function usablePackage(item: Item): { amount: number; unit: string } | null {
   return p !== null && Number.isFinite(p.amount) && p.amount > 0 ? p : null;
 }
 
-/**
- * Convert an amount in a measure into the item's coarse unit via package_size.
- * Item unit "bag" with package {1000,"g"}: (432,"g") -> 0.432; (2,"bag") -> 2.
- * Returns null when no conversion exists. Result is NOT rounded (callers
- * round on write; display rounds separately).
- */
-export function toItemUnit(item: Item, amount: number, measure: string): number | null {
-  const m = normUnit(measure);
-  // Already in the item's own unit: identity, package or not.
-  if (m === normUnit(item.unit)) return amount;
-  // 1 item.unit = pkg.amount pkg.unit, so an amount in pkg.unit divides down.
-  const pkg = usablePackage(item);
-  if (pkg !== null && m === normUnit(pkg.unit)) return amount / pkg.amount;
-  return null;
-}
-
 /** Precise-side display: 0.4 of a {1000,"g"} bag -> { amount: 400, unit: "g" }. */
 export function toPreciseUnit(item: Item): { amount: number; unit: string } | null {
   const pkg = usablePackage(item);

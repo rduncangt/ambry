@@ -8,7 +8,11 @@ import type { Item } from "../types";
 import { fold, tokens } from "./normalize";
 
 export interface SearchOptions {
-  /** Include soft-deleted items (create-flow offers restore). Default false. */
+  /**
+   * Include soft-deleted items. Default false. No app flow sets this today —
+   * tombstone surfacing for create-time restore is duplicateCandidates' job —
+   * but the option stays for callers that want a search over everything.
+   */
   includeDeleted?: boolean;
 }
 
@@ -70,7 +74,7 @@ function compare(a: string, b: string): number {
  * Create-time duplicate guard (PLAN.md §1.4): items — INCLUDING soft-deleted —
  * that likely mean the same thing as `name`: equal normalKey over name or any
  * alias, or one normalKey's token set contains the other's. Returned with live
- * items first.
+ * items first. Merge losers are excluded (see below).
  */
 export function duplicateCandidates(items: Item[], name: string): Item[] {
   const queryTokens = new Set(tokens(name));
@@ -78,15 +82,20 @@ export function duplicateCandidates(items: Item[], name: string): Item[] {
   // flagging the whole pantry as duplicates of "".
   if (queryTokens.size === 0) return [];
 
-  const matches = items.filter((item) =>
-    [item.name, ...item.aliases].some((label) => {
+  const matches = items.filter((item) => {
+    // A tombstone that LOST a merge must never surface: the survivor already
+    // carries its name as an alias (and matches here through it), and
+    // offering to restore the loser would un-repair the merge — the pantry
+    // would grow the duplicate back.
+    if (item.deleted_at !== null && item.merged_into !== null) return false;
+    return [item.name, ...item.aliases].some((label) => {
       const labelTokens = new Set(tokens(label));
       if (labelTokens.size === 0) return false;
       // Subset in either direction covers both contract cases: equal
       // normalKeys (mutual containment) and "canned tomatoes" vs "tomatoes".
       return isSubset(queryTokens, labelTokens) || isSubset(labelTokens, queryTokens);
-    })
-  );
+    });
+  });
 
   // Live items first (the open-it path); tombstones after (the restore path).
   // Input order is preserved within each group.

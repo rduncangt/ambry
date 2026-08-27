@@ -10,9 +10,8 @@
  * this pass is a UI fact about the walk, not data about the pantry.
  */
 import { useState } from "preact/hooks";
-import { fmtAge, fmtQtyBoth, ladderLabel } from "../../domain/format";
-import { readRung } from "../../domain/ladder";
-import { liveItems, stalest, valuesInUse } from "../../store/selectors";
+import { fmtAge, fmtLevel } from "../../domain/format";
+import { liveItems, resolveVocabValue, stalest, valuesInUse } from "../../store/selectors";
 import { now, type Item } from "../../types";
 import { QtyControl, Sheet } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
@@ -67,13 +66,6 @@ function oldestVerified(items: Item[]): string | null {
 
 function countText(n: number): string {
   return `${n} ${n === 1 ? "item" : "items"}`;
-}
-
-/** Current level as text: ladder items by rung, number items both-units. */
-function qtyText(item: Item): string {
-  return item.display_mode === "ladder"
-    ? ladderLabel(item.quantity, readRung(item.quantity))
-    : fmtQtyBoth(item);
 }
 
 export function ReconcileView() {
@@ -144,12 +136,24 @@ export function ReconcileView() {
   // -- explicit not-seen decisions (each is a human observation) -----------
 
   const zeroOut = (item: Item): void => {
+    // Capture the flag triple BEFORE the write: zeroing usually raises a
+    // threshold flag, and undoing the zero-out must also take that flag
+    // back down (or keep a pre-existing one exactly as it stood).
+    const flagsBefore = {
+      flagged: item.flagged,
+      flag_source: item.flag_source,
+      flagged_at: item.flagged_at,
+    };
     // A recount to 0: the human looked and it wasn't there. Stamps
     // verified_at inside the store — absence confirmed is still confirmed.
     store.setQuantity(item.id, 0);
     const last = store.lastQuantityWrite();
     if (last === null) toast(`${item.name}: set to 0`);
-    else toast(`${item.name}: set to 0`, () => store.undoQuantity(last.itemId, last.qtyBefore));
+    else {
+      toast(`${item.name}: set to 0`, () =>
+        store.undoQuantity(last.itemId, last.qtyBefore, flagsBefore),
+      );
+    }
     resolveItem(item.id, "zeroed");
   };
 
@@ -186,8 +190,7 @@ export function ReconcileView() {
     // without this view needing write callbacks.
     const isTouched = (i: Item): boolean => i.updated_at > stage.startIso;
     const pending = rows.filter((i) => !isTouched(i));
-    const touched = rows.filter(isTouched);
-    const checked = touched.length;
+    const checked = rows.length - pending.length;
 
     const finish = (): void => {
       if (pending.length === 0) {
@@ -215,17 +218,23 @@ export function ReconcileView() {
     };
 
     const row = (item: Item) => {
+      const touched = isTouched(item);
       const age =
         item.verified_at === null
           ? "never confirmed"
           : `last confirmed ${fmtAge(item.verified_at, nowIso)}`;
       return (
-        <li
-          key={item.id}
-          class={`recon-row${isTouched(item) ? " recon-touched" : ""}`}
-        >
+        <li key={item.id} class={`recon-row${touched ? " recon-touched" : ""}`}>
           <div class="recon-row-head">
-            <span class="row-title">{item.name}</span>
+            <span class="row-title">
+              {item.name}
+              {touched && (
+                <span class="recon-check" aria-hidden="true">
+                  {" "}
+                  ✓
+                </span>
+              )}
+            </span>
             <span class="row-sub">
               {stage.single ? age : `${item.location ?? "elsewhere"} · ${age}`}
             </span>
@@ -264,9 +273,11 @@ export function ReconcileView() {
           </p>
         )}
         <ul class="recon-list">
-          {/* touched rows dim and sink so the remainder stays visible */}
-          {pending.map(row)}
-          {touched.map(row)}
+          {/* ONE list in snapshot order: touched rows dim and get their ✓ in
+              place. Re-partitioning on each render made the FIRST stepper tap
+              sink the row, sliding the next row under a still-tapping finger —
+              a wrong-item write during the anti-drift flow. */}
+          {rows.map(row)}
         </ul>
         <button
           class="btn btn-primary btn-big recon-finish"
@@ -304,7 +315,7 @@ export function ReconcileView() {
               <div class="recon-row-head">
                 <span class="row-title">{item.name}</span>
                 <span class="row-sub">
-                  {qtyText(item)} · {item.location ?? "elsewhere"}
+                  {fmtLevel(item)} · {item.location ?? "elsewhere"}
                 </span>
               </div>
               <div class="recon-sweep-acts">
@@ -357,7 +368,10 @@ export function ReconcileView() {
                 class="recon-move-new"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  const t = newLoc.trim();
+                  // Case-insensitive match reuses the EXISTING casing so a
+                  // typed "Fridge" cannot mint a second location beside
+                  // "fridge".
+                  const t = resolveVocabValue(locations, newLoc);
                   if (t !== "") doMove(movingItem, t);
                 }}
               >
@@ -367,6 +381,7 @@ export function ReconcileView() {
                   placeholder="New location"
                   aria-label="New location"
                   autocomplete="off"
+                  autocapitalize="none"
                   value={newLoc}
                   onInput={(e) => setNewLoc(e.currentTarget.value)}
                 />
