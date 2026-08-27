@@ -1,0 +1,17 @@
+/* Placeholder — the UI milestone owns real styling. iOS hygiene from day one:
+   dvh not 100vh, >=16px inputs (else iOS zooms), safe-area padding. */
+:root {
+  --bg: #faf6f0;
+  --fg: #2b2015;
+  --accent: #8a5a2b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.4 -apple-system, system-ui, sans-serif;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+input, select, textarea, button { font-size: 16px; }
