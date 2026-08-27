@@ -158,6 +158,18 @@ describe("duplicateCandidates", () => {
     expect(names(duplicateCandidates(items, "bags clip"))).toEqual(["Bag Clips"]);
   });
 
+  // The singularization tiers must catch the TRUE singular in both directions:
+  // typing the singular against a stored plural, and the plural against a
+  // stored singular.
+  it.each([
+    ["Tomatoes", "tomato"],
+    ["Boxes", "box"],
+    ["Berries", "berry"],
+  ])("collides stored %j with typed %j and vice versa", (stored, typed) => {
+    expect(names(duplicateCandidates([makeItem({ name: stored })], typed))).toEqual([stored]);
+    expect(names(duplicateCandidates([makeItem({ name: typed })], stored))).toEqual([typed]);
+  });
+
   it("does not singularize 'ss' words: 'swis' is not a dup of 'Swiss'", () => {
     const items = [makeItem({ name: "Swiss" })];
     expect(duplicateCandidates(items, "swis")).toEqual([]);
@@ -168,6 +180,31 @@ describe("duplicateCandidates", () => {
       makeItem({ name: "Paprika", deleted_at: "2026-02-01T00:00:00.000Z" }),
     ];
     expect(names(duplicateCandidates(items, "paprika"))).toEqual(["Paprika"]);
+  });
+
+  it("never surfaces a merge loser — restoring it would un-repair the merge", () => {
+    const items = [
+      // Survivor of a merge, carrying the loser's name as an alias.
+      makeItem({ id: "survivor", name: "Scallions", aliases: ["Green Onions"] }),
+      // The loser's tombstone: deleted AND pointed at the survivor.
+      makeItem({
+        id: "loser",
+        name: "Green Onions",
+        deleted_at: "2026-02-01T00:00:00.000Z",
+        merged_into: "survivor",
+      }),
+      // A PLAIN deletion (no merge) must still surface for restore.
+      makeItem({
+        id: "plain-dead",
+        name: "Green Onion Dip",
+        deleted_at: "2026-02-01T00:00:00.000Z",
+        merged_into: null,
+      }),
+    ];
+    expect(duplicateCandidates(items, "green onions").map((i) => i.id)).toEqual([
+      "survivor",
+      "plain-dead",
+    ]);
   });
 
   describe("token-subset containment", () => {

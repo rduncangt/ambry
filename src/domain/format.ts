@@ -3,6 +3,7 @@
  * 0.432 bags never renders as 431.999... g (PLAN.md §1.5).
  */
 import { QTY_DECIMALS, type Item, type LadderRung } from "../types";
+import { readRung } from "./ladder";
 import { toPreciseUnit } from "./units";
 
 /** Same normalization as units.ts: case-insensitive, whitespace-trimmed. */
@@ -11,7 +12,8 @@ const normUnit = (u: string): string => u.trim().toLowerCase();
 /** Metric-ish symbols never pluralize: "432 g", not "432 gs". */
 const METRIC_UNITS = new Set(["g", "kg", "mg", "ml", "l"]);
 
-const RUNG_LABELS: Record<LadderRung, string> = {
+/** Rung display text — exported so every rung chip/label in the UI says the same word. */
+export const RUNG_LABELS: Record<LadderRung, string> = {
   full: "Full",
   half: "Half",
   low: "Low",
@@ -64,6 +66,32 @@ export function fmtQtyBoth(item: Item): string {
   // The derived side is rounded by fmtQty inside fmtQtyUnit, so float noise
   // from the multiplication (0.432 * 1000) never reaches the screen.
   return `${main} (${fmtQtyUnit(precise.amount, precise.unit)})`;
+}
+
+/**
+ * THE rule for "an item's level as text": ladder items render their rung
+ * label ("Half", "Full +2"), numeric items render both sides ("0.4 bags
+ * (400 g)"). One function so list rows, detail views, and pickers can never
+ * disagree about how a level reads.
+ */
+export function fmtLevel(item: Item): string {
+  if (item.display_mode === "ladder") {
+    return ladderLabel(item.quantity, readRung(item.quantity));
+  }
+  return fmtQtyBoth(item);
+}
+
+/**
+ * Decimal-comma-tolerant quantity parse: trim, "," as the decimal point,
+ * Number() semantics. Returns null for empty/unparseable/negative/non-finite
+ * input — quantities and thresholds are never negative, so rejecting here
+ * keeps every entry field's validation identical.
+ */
+export function parseDec(text: string): number | null {
+  const t = text.trim().replace(",", ".");
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 /** Relative age from an ISO timestamp: "3d ago", "2h ago", "just now"; null -> "never". */
