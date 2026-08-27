@@ -9,7 +9,16 @@
  * and trimmed. "Tomatoes,  Canned" -> "tomatoes canned".
  */
 export function fold(s: string): string {
-  throw new Error("TODO: implement (workflow)");
+  return s
+    .toLowerCase()
+    // NFD splits "ñ" into "n" + combining tilde; dropping the marks (\p{M})
+    // is what makes jalapeño and jalapeno the same word.
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    // Anything that isn't a letter or digit is a token break, not content —
+    // this is how "Tomatoes, canned" and "canned tomatoes" end up comparable.
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 /**
@@ -18,7 +27,19 @@ export function fold(s: string): string {
  * Deliberately naive — at ~300 items this catches bags/bag, tomatoes/tomatoe.
  */
 export function tokens(s: string): string[] {
-  throw new Error("TODO: implement (workflow)");
+  const folded = fold(s);
+  if (folded === "") return [];
+  return folded.split(" ").map(singularize);
+}
+
+/**
+ * Drop a trailing "s" from plural-looking tokens. The length > 3 guard keeps
+ * short words like "gas" intact; the "ss" guard keeps "swiss"/"glass" intact.
+ */
+function singularize(token: string): string {
+  return token.length > 3 && token.endsWith("s") && !token.endsWith("ss")
+    ? token.slice(0, -1)
+    : token;
 }
 
 /**
@@ -27,5 +48,5 @@ export function tokens(s: string): string[] {
  * at runtime only).
  */
 export function normalKey(s: string): string {
-  throw new Error("TODO: implement (workflow)");
+  return [...new Set(tokens(s))].sort().join(" ");
 }
