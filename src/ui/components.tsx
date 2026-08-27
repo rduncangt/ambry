@@ -6,7 +6,7 @@
  */
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { fmtQty, fmtQtyBoth, ladderLabel } from "../domain/format";
+import { fmtLevel, fmtQty, fmtQtyBoth, ladderLabel, parseDec, RUNG_LABELS } from "../domain/format";
 import { readRung, rungNeedsConfirm, rungValue } from "../domain/ladder";
 import type { Item, LadderRung } from "../types";
 import { useStore, useToast } from "./hooks";
@@ -74,7 +74,6 @@ export function Stepper(props: {
 // ---------------------------------------------------------------------------
 
 const RUNGS: LadderRung[] = ["full", "half", "low", "out"];
-const RUNG_TEXT: Record<LadderRung, string> = { full: "Full", half: "Half", low: "Low", out: "Out" };
 
 export function LadderChips(props: { item: Item; onRung: (rung: LadderRung) => void }) {
   const active = readRung(props.item.quantity);
@@ -83,7 +82,7 @@ export function LadderChips(props: { item: Item; onRung: (rung: LadderRung) => v
     // container, so a silent write would destroy a multi-container count.
     if (rungNeedsConfirm(props.item.quantity)) {
       const ok = window.confirm(
-        `Quantity is ${fmtQty(props.item.quantity)} — set to ${RUNG_TEXT[rung].toLowerCase()} (${fmtQty(rungValue(rung))})?`,
+        `Quantity is ${fmtQty(props.item.quantity)} — set to ${RUNG_LABELS[rung].toLowerCase()} (${fmtQty(rungValue(rung))})?`,
       );
       if (!ok) return;
     }
@@ -98,7 +97,7 @@ export function LadderChips(props: { item: Item; onRung: (rung: LadderRung) => v
           class={`chip${rung === active ? " chip-active" : ""}`}
           onClick={() => tap(rung)}
         >
-          {RUNG_TEXT[rung]}
+          {RUNG_LABELS[rung]}
         </button>
       ))}
     </span>
@@ -109,10 +108,11 @@ export function LadderChips(props: { item: Item; onRung: (rung: LadderRung) => v
 // QtyControl — the shared quantity writer
 // ---------------------------------------------------------------------------
 
-/** Inline absolute entry. Commit on submit; blur commits only when the text
- *  changed (an accidental tap elsewhere must not mint a recount event —
- *  deliberate "still the same" confirmation is reconcile's ✓, not this). */
-function InlineQtyInput(props: { initial: string; onDone: (raw: string | null) => void }) {
+/** Inline absolute entry (shared: QtyControl here, ShoppingView's buy-amount
+ *  entry). Commit on submit; blur commits only when the text changed (an
+ *  accidental tap elsewhere must not mint a recount event — deliberate
+ *  "still the same" confirmation is reconcile's ✓, not this). */
+export function InlineQtyInput(props: { initial: string; onDone: (raw: string | null) => void }) {
   const [val, setVal] = useState(props.initial);
   const inputRef = useRef<HTMLInputElement>(null);
   const done = useRef(false);
@@ -162,27 +162,36 @@ export function QtyControl(props: { item: Item }) {
   const [editing, setEditing] = useState(false);
   const item = props.item;
 
-  /** Every write ends here: the store mutated `item` in place, so reading it
-   *  again gives the post-write state for the message; lastQuantityWrite()
-   *  feeds the compensating undo. */
-  const fireUndoToast = (): void => {
-    const message =
-      item.display_mode === "ladder"
-        ? `${item.name}: ${ladderLabel(item.quantity, readRung(item.quantity))}`
-        : `${item.name}: ${fmtQtyBoth(item)}`;
+  /** Snapshot the flag triple BEFORE a write: quantity writes can raise or
+   *  clear the flag as a side effect, and undo must put back the exact prior
+   *  flag state — the compensating recount's own flag evaluation cannot
+   *  reconstruct e.g. a manual flag a purchase cleared. */
+  const flagsBefore = (): { flagged: boolean; flag_source: Item["flag_source"]; flagged_at: string | null } => ({
+    flagged: item.flagged,
+    flag_source: item.flag_source,
+    flagged_at: item.flagged_at,
+  });
+
+  /** Every write ends here: the store mutated `item` in place, so fmtLevel
+   *  reads the post-write state for the message; lastQuantityWrite() feeds
+   *  the compensating undo, `restore` the pre-write flag snapshot. */
+  const fireUndoToast = (restore: ReturnType<typeof flagsBefore>): void => {
+    const message = `${item.name}: ${fmtLevel(item)}`;
     const last = store.lastQuantityWrite();
     if (last === null) toast(message);
-    else toast(message, () => store.undoQuantity(last.itemId, last.qtyBefore));
+    else toast(message, () => store.undoQuantity(last.itemId, last.qtyBefore, restore));
   };
 
   const commitAbsolute = (raw: string | null): void => {
     setEditing(false);
     if (raw === null) return;
-    // Decimal-comma tolerance; the store rounds and clamps (roundQty).
-    const n = Number(raw.trim().replace(",", "."));
-    if (raw.trim() === "" || !Number.isFinite(n)) return;
+    // parseDec: decimal-comma tolerance, rejects negatives; the store rounds
+    // and clamps (roundQty).
+    const n = parseDec(raw);
+    if (n === null) return;
+    const restore = flagsBefore();
     store.setQuantity(item.id, n);
-    fireUndoToast();
+    fireUndoToast(restore);
   };
 
   const marks = (
@@ -217,8 +226,9 @@ export function QtyControl(props: { item: Item }) {
         <LadderChips
           item={item}
           onRung={(rung) => {
+            const restore = flagsBefore();
             store.setLadderRung(item.id, rung);
-            fireUndoToast();
+            fireUndoToast(restore);
           }}
         />
       </span>
@@ -231,8 +241,9 @@ export function QtyControl(props: { item: Item }) {
       <Stepper
         value={fmtQtyBoth(item)}
         onDelta={(d) => {
+          const restore = flagsBefore();
           store.adjustQuantity(item.id, d);
-          fireUndoToast();
+          fireUndoToast(restore);
         }}
         onTapValue={() => setEditing(true)}
       />

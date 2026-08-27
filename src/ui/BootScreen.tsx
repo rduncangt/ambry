@@ -25,23 +25,30 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
     setError(null);
     const file = await pickFile("application/json,.json,text/plain");
     if (file === null) return;
-    const text = await readText(file);
-    const parsed = parseImport(text);
-    if (!parsed.ok) {
-      setError(
-        parsed.error === "newer_schema"
-          ? "This backup was made by a newer version of Ambry — update the app first, then restore."
-          : `That file could not be read as an Ambry backup. (${parsed.detail})`,
-      );
-      return;
+    // Everything after the pick can throw (file.text() rejects when the
+    // picked file vanished or the permission lapsed) — a thrown read must
+    // surface as an error, never leave this screen silently unresponsive.
+    try {
+      const text = await readText(file);
+      const parsed = parseImport(text);
+      if (!parsed.ok) {
+        setError(
+          parsed.error === "newer_schema"
+            ? "This backup was made by a newer version of Ambry — update the app first, then restore."
+            : `That file could not be read as an Ambry backup. (${parsed.detail})`,
+        );
+        return;
+      }
+      // Preview before replacing — counts recomputed from the migrated doc, so
+      // they describe what will actually land.
+      setPreview({
+        doc: parsed.doc,
+        exportedAt: parsed.envelope.exported_at,
+        counts: parsed.envelope.counts,
+      });
+    } catch {
+      setError("Could not read that file — try picking it again.");
     }
-    // Preview before replacing — counts recomputed from the migrated doc, so
-    // they describe what will actually land.
-    setPreview({
-      doc: parsed.doc,
-      exportedAt: parsed.envelope.exported_at,
-      counts: parsed.envelope.counts,
-    });
   }
 
   function restore(): void {

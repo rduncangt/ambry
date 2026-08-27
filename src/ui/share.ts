@@ -5,14 +5,20 @@
  */
 import { exportFilename } from "../domain/exportImport";
 import type { Store } from "../store/store";
+import type { ShowToast } from "./hooks";
+import { isIOS } from "./sw-client";
 
-export type ExportResult = "shared" | "downloaded" | "cancelled";
+export type ExportResult = "shared" | "downloaded" | "cancelled" | "failed";
 
 /**
  * Build the envelope and hand it to navigator.share when file-sharing is
- * supported, else fall back to an anchor download. recordExport() runs ONLY
- * on a completed share/download — an abandoned share sheet (AbortError) must
- * not silently reset the staleness nag.
+ * supported; the anchor download is the fallback ONLY off iOS. recordExport()
+ * runs ONLY on a completed share/download — an abandoned share sheet
+ * (AbortError) must not silently reset the staleness nag, and a share
+ * FAILURE must never claim success: on standalone iOS the <a download>
+ * fallback can fail silently, so stamping last_export_at there would disarm
+ * the staleness nag while no backup exists (the durability lie PLAN.md §1.1
+ * forbids). "failed" means nothing left the device.
  */
 export async function exportFlow(store: Store): Promise<ExportResult> {
   const envelope = store.buildExport();
@@ -29,9 +35,18 @@ export async function exportFlow(store: Store): Promise<ExportResult> {
     } catch (e) {
       // AbortError = the user closed the sheet: nothing left the device.
       if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
-      // Any other share failure: fall through to the download path below.
+      // Any other share failure: report it honestly. No anchor fallback here
+      // — when share IS supported but broke, silently rerouting to a
+      // download the user never asked for (and which may itself fail
+      // silently on iOS) hides the failure.
+      return "failed";
     }
   }
+
+  // File-sharing unsupported. On iOS the anchor path is not trustworthy
+  // (standalone Safari can drop the download without any signal), so refuse
+  // rather than record an export that may not exist.
+  if (isIOS()) return "failed";
 
   const url = URL.createObjectURL(file);
   const a = document.createElement("a");
@@ -45,6 +60,19 @@ export async function exportFlow(store: Store): Promise<ExportResult> {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   store.recordExport();
   return "downloaded";
+}
+
+/**
+ * THE export UX: run exportFlow and toast the outcome. Every export button
+ * goes through here so no caller can invent its own (possibly dishonest)
+ * wording for a cancelled or failed export.
+ */
+export async function doExportWithToast(store: Store, toast: ShowToast): Promise<void> {
+  const result = await exportFlow(store);
+  if (result === "shared") toast("Backup exported");
+  else if (result === "downloaded") toast("Backup downloaded");
+  else if (result === "cancelled") toast("Export cancelled — no backup was made");
+  else toast("Export failed — try again");
 }
 
 /**
