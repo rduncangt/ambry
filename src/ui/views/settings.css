@@ -34,6 +34,15 @@
 }
 .settings-kv-label { color: var(--muted); }
 
+/* snapshot rows: label/size line plus the Share/Restore/Delete action row */
+.settings-snap { margin-bottom: var(--s3); }
+.settings-snap-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+.settings-snap-delete { color: var(--danger); }
+
 /* import preview card + the loud older-than-local warning (PLAN.md §1.3) */
 .settings-import-card {
   border: 1px solid var(--line);

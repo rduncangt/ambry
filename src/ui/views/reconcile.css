@@ -64,9 +64,13 @@
   padding: var(--s3) 0;
   border-bottom: 1px solid var(--line);
 }
-/* verified/edited rows dim (they also sink below the pending ones) */
+/* verified/edited rows dim IN PLACE — never resorted, so the next row can't
+   slide under a finger mid-tap */
 .recon-touched {
   opacity: 0.45;
+}
+.recon-check {
+  color: var(--ok);
 }
 .recon-row-head {
   display: flex;
