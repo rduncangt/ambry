@@ -47,7 +47,12 @@ export function fmtQtyUnit(qty: number, unit: string): string {
   // 1 (shown as "1") never reads "1 bags".
   const plural =
     q !== "1" && /^[a-z]+$/i.test(u) && !nu.endsWith("s") && !METRIC_UNITS.has(nu);
-  return `${q} ${plural ? `${u}s` : u}`;
+  if (!plural) return `${q} ${u}`;
+  // English needs -es after sibilant-ish endings (bunch -> bunches,
+  // box -> boxes); everything else keeps the naive +s. Units ending in "s"
+  // were already excluded above, so no "glass" special case is needed.
+  const es = /(ch|sh|x|z)$/i.test(u);
+  return `${q} ${u}${es ? "es" : "s"}`;
 }
 
 /** "Full", "Half", "Low", "Out"; qty > 1 -> "Full +N" (N = qty-1, fmtQty'd). */
