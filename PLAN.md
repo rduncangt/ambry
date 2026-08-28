@@ -391,11 +391,14 @@ reload button and no URL bar — a dead-end screen is a force-quit).
 vanity: storage and the install are keyed to the origin, so the URL is effectively part
 of the database. A subdomain of a domain already owned beats a fresh registration on the
 one axis that matters — it inherits a renewal commitment that already exists, so there is
-no new way for the origin to lapse and orphan the data. `sciomedes.com` runs on Squarespace
-with DNS delegated to Google Cloud DNS, and `ambry.sciomedes.com` is currently unused.
+no new way for the origin to lapse and orphan the data. `sciomedes.com` is registered and
+DNS-managed at Squarespace; the `ns-cloud-*.googledomains.com` nameservers are legacy
+Google Domains infrastructure Squarespace inherited, not a Cloud DNS zone we control.
 
-Setup: a `CNAME` record `ambry` → `rduncangt.github.io` in the Cloud DNS zone, a
-`CNAME` file in the repo, and Pages' "Enforce HTTPS" once Let's Encrypt provisions.
+Setup as built: `public/CNAME` in the repo (Vite copies `public/` into `dist/`; a
+root-level CNAME would be dropped at build time and silently unset the domain), the
+repo's custom domain claimed *before* any DNS pointed at GitHub to close the
+subdomain-takeover window, then A/AAAA records at Squarespace, then Enforce HTTPS.
 GitHub Pages is the right host here specifically because it takes a plain CNAME from any
 external DNS provider; Cloudflare Pages prefers the zone to live on Cloudflare, which
 this one doesn't. DNS can later repoint to a different static host without changing the
@@ -512,10 +515,12 @@ adapter.
 
 ## 6. Decisions only you can make
 
-1. ~~**The URL**~~ — **DECIDED 2026-08-27: `ambry.sciomedes.com`**, served by GitHub Pages
-   from `rduncangt/ambry` (repo not yet created), CNAME `ambry` → `rduncangt.github.io`
-   in the existing Google Cloud DNS zone (§3). Subdomain unused; SSH and `gh` auth to
-   GitHub verified working as `rduncangt`. Nothing left open here.
+1. ~~**The URL**~~ — **DONE 2026-08-27: `ambry.sciomedes.com`**, live and serving from
+   `rduncangt/ambry` via GitHub Pages (Actions build, `public/CNAME`). DNS is managed at
+   Squarespace, not Google Cloud DNS as §3 first assumed — the `ns-cloud-*` nameservers
+   are legacy Google Domains infrastructure Squarespace inherited. Their editor rejected
+   a CNAME, so the subdomain points at GitHub's four A and four AAAA anycast addresses;
+   see TODO.md for the revisit.
 2. **The stack fork** (§3): Preact+TS+Vite (recommended) vs zero-build vanilla+JSDoc.
    Everything else in this plan survives either choice.
 3. **Retention default** — brief says ~1 year, configurable; fine, and at localStorage
