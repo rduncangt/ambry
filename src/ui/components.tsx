@@ -164,6 +164,14 @@ export function QtyControl(props: {
    *  narrow phone. The detail overlay (and toasts, via fmtLevel) keep the
    *  full fmtQtyBoth. */
   brief?: boolean;
+  /** Suppress the flag-dot mark: for rows whose own cart toggle already
+   *  shows the flag state (InventoryView) — two marks for one fact is
+   *  noise. Rows without that control (Shopping/Reconcile) keep the dot. */
+  hideFlag?: boolean;
+  /** Rows in a location visit's uncounted tail reserve the "?" mark's box
+   *  even after being counted, so the cluster width (and its wrap point on
+   *  narrow screens) stays fixed for the whole visit. */
+  holdUnknownSlot?: boolean;
 }) {
   const store = useStore();
   const toast = useToast();
@@ -268,7 +276,9 @@ export function QtyControl(props: {
 
   const marks = (
     <span class="qty-marks">
-      {item.flagged && <span class="flag-dot" title="Flagged for shopping" />}
+      {item.flagged && props.hideFlag !== true && (
+        <span class="flag-dot" title="Flagged for shopping" />
+      )}
       {item.never_prompt && (
         <span class="nobell" title="Auto-flag off">
           🔕
@@ -276,6 +286,14 @@ export function QtyControl(props: {
       )}
       {/* Ladder rows carry no badge: the rung chip itself already says Out,
           and the "?" state renders as the chip's dashed-unknown style. */}
+      {/* holdUnknownSlot: rows in a visit's uncounted tail keep the "?" box
+          (hidden once counted) so the cluster width — and its wrap state on
+          narrow screens — cannot change under the finger mid-visit. */}
+      {item.display_mode !== "ladder" && props.holdUnknownSlot === true && !isUncounted(item) && (
+        <span class="badge badge-unknown" style="visibility:hidden" aria-hidden="true">
+          ?
+        </span>
+      )}
       {item.display_mode !== "ladder" &&
         item.quantity === 0 &&
         (item.verified_at === null ? (
@@ -318,7 +336,10 @@ export function QtyControl(props: {
           />
         ) : (
           <button
-            class={`chip qty-rung${unknown ? " qty-rung-unknown" : " chip-active"}`}
+            // Control-scale outline chip (.qty-rung), NOT the filled
+            // .chip-active: solid fill is the expanded row's selected-rung
+            // voice; collapsed, this is a button that opens the ladder.
+            class={`chip qty-rung${unknown ? " qty-rung-unknown" : ""}`}
             type="button"
             title={unknown ? "Never counted — set during a shelf walk" : undefined}
             onClick={() => setLadderOpen(true)}

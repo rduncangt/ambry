@@ -3,9 +3,9 @@
  * All state flows from useDoc(); all writes go through the Store commands.
  */
 import { useEffect, useState } from "preact/hooks";
-import { exportNag, shoppingList } from "../store/selectors";
+import { backupAgeDays, exportNag, shoppingList } from "../store/selectors";
 import type { Store } from "../store/store";
-import { now } from "../types";
+import { EXPORT_NAG_DAYS, now } from "../types";
 import { BootScreen } from "./BootScreen";
 import { Banner, Sheet } from "./components";
 import {
@@ -112,8 +112,18 @@ function Shell() {
           </Banner>
         )}
         {nag === "banner" && (
+          // ONE short line: a taller banner scroll-sheared into an orphaned
+          // half-sentence above the sticky Pantry header. The what's-at-risk
+          // sentence lives in Settings next to the same numbers; the banner
+          // names whichever threshold actually fired (age or write count).
           <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
-            Your backup is stale — everything entered since the last export is unprotected.
+            {doc.settings.last_export_at === null
+              ? // Never exported: "backup is N days old" would send the user
+                // hunting iCloud for a file that does not exist.
+                `No backup yet — ${Math.floor(backupAgeDays(doc, nowIso))} days of data at risk.`
+              : backupAgeDays(doc, nowIso) >= EXPORT_NAG_DAYS * 2
+                ? `Backup is ${Math.floor(backupAgeDays(doc, nowIso))} days old.`
+                : `${doc.settings.writes_since_export} changes since the last backup.`}
           </Banner>
         )}
       </div>
