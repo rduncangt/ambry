@@ -202,7 +202,16 @@ export function QtyControl(props: { item: Item }) {
           🔕
         </span>
       )}
-      {item.quantity === 0 && <span class="badge badge-out">Out</span>}
+      {item.quantity === 0 &&
+        (item.verified_at === null ? (
+          // Zero that no human ever observed is not "Out" — it's unknown.
+          // Seeded items wear this until the first shelf-walk count.
+          <span class="badge badge-unknown" title="Never counted — set during a shelf walk">
+            ?
+          </span>
+        ) : (
+          <span class="badge badge-out">Out</span>
+        ))}
     </span>
   );
 

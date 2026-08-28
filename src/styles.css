@@ -63,6 +63,21 @@ h1, h2, h3, p { margin: 0; }
   padding: var(--s4);
   padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s5));
 }
+/* The body is the scroll region, so .app's safe-area padding scrolls away
+   with the page and rows slide under the iOS status bar. This fixed, opaque
+   strip masks them; z-index sits above rows but below overlays/sheets so
+   their own chrome still wins. */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--bg);
+  z-index: 30;
+  pointer-events: none;
+}
 .banners { display: flex; flex-direction: column; }
 
 /* -- view scaffolding ------------------------------------------------------
@@ -103,6 +118,17 @@ h1, h2, h3, p { margin: 0; }
   padding: env(safe-area-inset-top) var(--s4) calc(env(safe-area-inset-bottom) + var(--s5));
 }
 .overlay-body { padding-top: var(--s2); }
+.overlay::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background: var(--bg);
+  z-index: 1;
+  pointer-events: none;
+}
 
 /* -- buttons ---------------------------------------------------------------
    .btn — base tappable; .btn-primary accent fill; .btn-danger destructive;
@@ -141,13 +167,22 @@ h1, h2, h3, p { margin: 0; }
 .row {
   display: flex;
   align-items: center;
-  gap: var(--s3);
+  gap: var(--s2);
   min-height: 56px;
   padding: var(--s2) 0;
   border-bottom: 1px solid var(--line);
 }
 .row-main { flex: 1; min-width: 0; }
-.row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The name IS the aisle answer — wrap to two lines rather than truncate
+   ("Cheddar ch..." fails the 3-second test). Clamp keeps pathological names
+   from eating the row. */
+.row-title {
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .row-sub { font-size: 14px; color: var(--muted); }
 
 /* -- badges & markers ------------------------------------------------------
@@ -164,6 +199,12 @@ h1, h2, h3, p { margin: 0; }
   color: var(--ink);
 }
 .badge-out { background: var(--danger-soft); color: var(--danger); }
+/* Zero nobody ever counted — dashed and muted, not a red claim. */
+.badge-unknown {
+  background: transparent;
+  border: 1px dashed var(--muted);
+  color: var(--muted);
+}
 .flag-dot {
   display: inline-block;
   width: 9px;
@@ -340,7 +381,7 @@ h1, h2, h3, p { margin: 0; }
 }
 .stepper-btn:active { filter: brightness(0.95); }
 .stepper-value {
-  min-width: 56px;
+  min-width: 44px;
   text-align: center;
   font-weight: 600;
   font-variant-numeric: tabular-nums;

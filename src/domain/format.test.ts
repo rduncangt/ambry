@@ -74,6 +74,11 @@ describe("fmtQtyUnit", () => {
     [1, "bag", "1 bag"],
     [0.5, "bag", "0.5 bags"],
     [0, "bag", "0 bags"],
+    // sibilant-ish endings take -es (the screenshot bug: "0 bunchs")
+    [0, "bunch", "0 bunches"],
+    [2, "box", "2 boxes"],
+    [3, "dish", "3 dishes"],
+    [1, "bunch", "1 bunch"],
     // already ends in "s": never doubled
     [2, "oats", "2 oats"],
     // metric-ish symbols stay bare of the plural
@@ -133,7 +138,7 @@ describe("fmtQtyBoth", () => {
   it("pluralizes a countable precise side", () => {
     const item = makeItem({ unit: "box", quantity: 2, package_size: { amount: 8, unit: "stick" } });
     // naive "+s" on both sides
-    expect(fmtQtyBoth(item)).toBe("2 boxs (16 sticks)");
+    expect(fmtQtyBoth(item)).toBe("2 boxes (16 sticks)");
   });
 
   it("works after a unit change left an inverted package (g -> bag)", () => {
