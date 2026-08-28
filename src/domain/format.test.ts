@@ -74,6 +74,10 @@ describe("fmtQtyUnit", () => {
     [1, "bag", "1 bag"],
     [0.5, "bag", "0.5 bags"],
     [0, "bag", "0 bags"],
+    // irregular plurals beat the suffix tiers (the screenshot bug: "2 loafs")
+    [2, "loaf", "2 loaves"],
+    [1, "loaf", "1 loaf"],
+    [2, "Loaf", "2 Loaves"],
     // sibilant-ish endings take -es (the screenshot bug: "0 bunchs")
     [0, "bunch", "0 bunches"],
     [2, "box", "2 boxes"],
