@@ -5,3 +5,6 @@ dist/
 
 # personal scratch notes, not part of the app
 first_items.md
+
+# real exports from the app must never be committed (personal data)
+ambry-backup-*.json
