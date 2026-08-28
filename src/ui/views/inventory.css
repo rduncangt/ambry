@@ -2,10 +2,10 @@
    from styles.css; this file only pins the search bar and shapes the rows'
    view-local affordances. */
 
-/* Last row must scroll clear of the fixed search bar (tap target + its
-   vertical padding + hairline), on top of .content's own tab-bar clearance. */
+/* Last row must scroll clear of the fixed search bar (--searchbar-h, the
+   shared token in styles.css), on top of .content's own tab-bar clearance. */
 .inv-view {
-  padding-bottom: calc(var(--tap) + var(--s2) * 2 + 1px + var(--s3));
+  padding-bottom: calc(var(--searchbar-h) + var(--s3));
 }
 
 /* Thumb-zone search: fixed directly above the tab bar. z-index sits below the
@@ -36,18 +36,15 @@
   border-color: var(--accent);
 }
 
-/* Flagged-count + stale-hint line above the groups. The stale hint is a real
-   button (it navigates to reconcile) styled as an inline link. */
+/* Screen-caption line (the reconcile nudge inside the sticky header). The
+   stale hint is a real button (it navigates to reconcile) styled as an
+   inline link. */
 .inv-summary {
   font-size: 14px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--s1);
-  margin-bottom: var(--s2);
-}
-.inv-summary .flag-dot {
-  margin-right: var(--s1);
 }
 .inv-stale {
   background: none;
@@ -59,15 +56,71 @@
   font-weight: 600;
 }
 
-/* Location group header — quiet, so the rows stay the loudest thing. */
-.inv-loc {
+/* Section heading ("Low & flagged") — the location headers' quiet voice,
+   minus their per-word capitalization. */
+.inv-sec {
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-transform: capitalize;
   color: var(--muted);
-  margin-top: var(--s4);
+  margin-top: var(--s3);
 }
+
+/* Location cards — the default screen is a shelf directory, not the full
+   list: one generous tappable card per location. */
+.loc-cards {
+  list-style: none;
+  margin: var(--s3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.loc-card {
+  width: 100%;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: left;
+}
+.loc-card:active { filter: brightness(0.97); }
+.loc-card-main { flex: 1; min-width: 0; }
+.loc-card-name { display: block; font-weight: 600; }
+.loc-card-meta { font-size: 14px; color: var(--muted); }
+/* The one marker that means "act": low count in the danger tint. */
+.loc-card-low { color: var(--danger); }
+.loc-card-chevron { flex-shrink: 0; color: var(--muted); font-size: 20px; }
+
+/* Divider between the counted shelf and the seeded-but-never-counted pile:
+   a quiet toggle, collapsed by default so a hundred "?" rows can never bury
+   the handful of real counts. */
+.inv-uncounted-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  background: none;
+  border: none;
+  min-height: var(--tap);
+  padding: 0;
+  text-align: left;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.inv-chevron {
+  display: inline-block;
+  font-size: 18px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.inv-chevron-open { transform: rotate(90deg); }
 
 .inv-list {
   list-style: none;
@@ -102,15 +155,31 @@
   color: var(--muted);
 }
 
-/* Compact overflow target: the manual flag toggle. Narrower than --tap on
-   purpose (it is a secondary affordance beside the full-height row). */
+/* Compact-LOOKING overflow target: the manual flag toggle. It sits 8px from
+   the stepper's 44px "+" in the densest tap area of the app, so the hit box
+   is the full 44px; the negative margin overlaps the row's right-edge
+   whitespace (rows have no horizontal padding, nothing tappable lives
+   there) — the sheet-close/back-btn trick — so the row stays visually
+   compact. */
 .inv-more {
   background: none;
   border: none;
   color: var(--muted);
-  width: 36px;
+  width: var(--tap);
+  margin-right: calc(-1 * var(--s1));
   min-height: var(--tap);
   font-size: 20px;
   flex-shrink: 0;
   padding: 0;
+}
+
+/* Cap the stepper's value in list rows so one long label ("10 bottles")
+   cannot force the control cluster onto its own line for every row; the
+   full string still lives in the detail overlay and toasts. Row values are
+   single-side (fmtQtyUnit) so the cap almost never actually bites. */
+.inv-view .stepper-value {
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

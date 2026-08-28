@@ -16,8 +16,10 @@ function isoAsc(a: string | null, b: string | null): number {
   return sa < sb ? -1 : sa > sb ? 1 : 0;
 }
 
-/** Case-insensitive alphabetical, exact string as the tiebreaker. */
-function alpha(a: string, b: string): number {
+/** Case-insensitive alphabetical, exact string as the tiebreaker. Exported
+ *  so view-side re-sorts (InventoryView's visit partition) can never drift
+ *  from the selectors' own row order. */
+export function alpha(a: string, b: string): number {
   const la = a.toLowerCase();
   const lb = b.toLowerCase();
   if (la < lb) return -1;
@@ -78,25 +80,117 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   return { toBuy, extras, inCart };
 }
 
-/** Inventory grouped by location (null -> "elsewhere"), alphabetical within. */
-export function groupedInventory(doc: AmbryDoc): { location: string; items: Item[] }[] {
-  const groups = new Map<string, Item[]>();
+/**
+ * Seeded-but-never-counted: a zero no human ever observed (the "?" badge
+ * rule). NOT "out" — absence was never verified, so it must never read as a
+ * shortage or bury the rows that carry real counts.
+ */
+export function isUncounted(item: Item): boolean {
+  return item.quantity === 0 && item.verified_at === null;
+}
+
+/**
+ * Genuinely low: a live, counted item at or under its threshold. Uncounted
+ * zeros are excluded — an unverified 0 is a question, not a shortage.
+ */
+export function isLow(item: Item): boolean {
+  return (
+    item.deleted_at === null &&
+    !isUncounted(item) &&
+    item.threshold !== null &&
+    item.quantity <= item.threshold
+  );
+}
+
+/**
+ * The "Low & flagged" attention list: live items needing action — flagged
+ * ones first (oldest flagged_at first, the shopping list's rule), then
+ * unflagged low items by name. A flag is a human act, so flagged items
+ * appear even while uncounted — the Shopping tab counts them, and this list
+ * must agree. The uncounted guard protects only the threshold-derived branch
+ * (it lives inside isLow): a pile of seeded "?" rows must not drown the real
+ * shortages, and threshold flags only raise on quantity writes, so the
+ * seeded pile can never flood in through the flagged branch either.
+ */
+export function attentionItems(doc: AmbryDoc): Item[] {
+  const flagged: Item[] = [];
+  const low: Item[] = [];
   for (const item of doc.items) {
     if (item.deleted_at !== null) continue;
-    const location = item.location ?? "elsewhere";
-    const bucket = groups.get(location);
-    if (bucket === undefined) groups.set(location, [item]);
-    else bucket.push(item);
+    if (item.flagged) flagged.push(item);
+    else if (isLow(item)) low.push(item);
   }
-  return [...groups.entries()]
-    .sort(([a], [b]) => {
-      // Real locations alphabetical; the null-bucket "elsewhere" always sinks
-      // to the end (the un-filed pile belongs after the named shelves).
-      if (a === "elsewhere" && b !== "elsewhere") return 1;
-      if (b === "elsewhere" && a !== "elsewhere") return -1;
-      return alpha(a, b);
-    })
-    .map(([location, items]) => ({ location, items: items.sort((a, b) => alpha(a.name, b.name)) }));
+  flagged.sort((a, b) => isoAsc(a.flagged_at, b.flagged_at));
+  low.sort((a, b) => alpha(a.name, b.name));
+  return [...flagged, ...low];
+}
+
+/** The physical walk order of the standard shelves; everything else follows alphabetically. */
+const LOCATION_ORDER = ["pantry", "fridge", "freezer", "countertop"];
+
+export interface LocationSummary {
+  /** null = the no-location "elsewhere" bucket. */
+  location: string | null;
+  total: number;
+  /** Items a human has counted (everything not `isUncounted`). */
+  counted: number;
+  low: number;
+  flagged: number;
+  uncounted: number;
+}
+
+/**
+ * One card per location over live items, in walking order: the physical
+ * pantry → fridge → freezer → countertop sequence first (when present,
+ * matched case-insensitively so an "iOS-capitalized" seed still ranks),
+ * remaining locations alphabetically, the null-location bucket last.
+ */
+export function locationSummaries(doc: AmbryDoc): LocationSummary[] {
+  const rows = new Map<string | null, LocationSummary>();
+  for (const item of doc.items) {
+    if (item.deleted_at !== null) continue;
+    let row = rows.get(item.location);
+    if (row === undefined) {
+      row = { location: item.location, total: 0, counted: 0, low: 0, flagged: 0, uncounted: 0 };
+      rows.set(item.location, row);
+    }
+    row.total++;
+    if (isUncounted(item)) row.uncounted++;
+    else row.counted++;
+    if (isLow(item)) row.low++;
+    if (item.flagged) row.flagged++;
+  }
+  const rank = (loc: string | null): number => {
+    // The un-filed pile belongs after every named shelf.
+    if (loc === null) return LOCATION_ORDER.length + 1;
+    const i = LOCATION_ORDER.indexOf(loc.toLowerCase());
+    return i === -1 ? LOCATION_ORDER.length : i;
+  };
+  return [...rows.values()].sort((a, b) => {
+    const diff = rank(a.location) - rank(b.location);
+    if (diff !== 0) return diff;
+    return alpha(a.location ?? "", b.location ?? "");
+  });
+}
+
+/**
+ * The items behind one location card (null = the "elsewhere" bucket), split
+ * counted vs uncounted so the seeded-but-never-counted pile can sit behind a
+ * collapsed divider instead of burying the real shelf. Alphabetical within.
+ */
+export function itemsInLocation(
+  doc: AmbryDoc,
+  location: string | null,
+): { counted: Item[]; uncounted: Item[] } {
+  const counted: Item[] = [];
+  const uncounted: Item[] = [];
+  for (const item of doc.items) {
+    if (item.deleted_at !== null || item.location !== location) continue;
+    (isUncounted(item) ? uncounted : counted).push(item);
+  }
+  counted.sort((a, b) => alpha(a.name, b.name));
+  uncounted.sort((a, b) => alpha(a.name, b.name));
+  return { counted, uncounted };
 }
 
 /** Distinct non-empty values in use (for pickers), alphabetical. */
