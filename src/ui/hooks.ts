@@ -46,6 +46,13 @@ export function useDoc(): AmbryDoc {
 
 export type View = "pantry" | "shopping" | "more" | "reconcile";
 
+/** Context seeds for the quick-create sheet — where the user is standing
+ *  when they create (PLAN.md §4 M1: quick create preselects a location). */
+export interface CreateDefaults {
+  /** Preselected location; null/omitted = none (the "elsewhere" bucket). */
+  location?: string | null;
+}
+
 export interface Nav {
   view: View;
   /** Switching views also closes the item overlay and the create sheet. */
@@ -57,7 +64,8 @@ export interface Nav {
   /** Quick-create sheet; prefill is the typed-but-unmatched search text. */
   creating: boolean;
   createPrefill: string | null;
-  openCreate(prefill: string | null): void;
+  createDefaults: CreateDefaults | null;
+  openCreate(prefill: string | null, defaults?: CreateDefaults): void;
   closeCreate(): void;
 }
 
@@ -68,6 +76,7 @@ export function NavProvider(props: { children: ComponentChildren }) {
   const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createPrefill, setCreatePrefill] = useState<string | null>(null);
+  const [createDefaults, setCreateDefaults] = useState<CreateDefaults | null>(null);
 
   const nav = useMemo<Nav>(
     () => ({
@@ -78,6 +87,7 @@ export function NavProvider(props: { children: ComponentChildren }) {
         setOpenItemId(null);
         setCreating(false);
         setCreatePrefill(null);
+        setCreateDefaults(null);
         setViewState(v);
       },
       openItemId,
@@ -85,16 +95,19 @@ export function NavProvider(props: { children: ComponentChildren }) {
       closeItem: () => setOpenItemId(null),
       creating,
       createPrefill,
-      openCreate: (prefill: string | null) => {
+      createDefaults,
+      openCreate: (prefill: string | null, defaults?: CreateDefaults) => {
         setCreatePrefill(prefill);
+        setCreateDefaults(defaults ?? null);
         setCreating(true);
       },
       closeCreate: () => {
         setCreating(false);
         setCreatePrefill(null);
+        setCreateDefaults(null);
       },
     }),
-    [view, openItemId, creating, createPrefill],
+    [view, openItemId, creating, createPrefill, createDefaults],
   );
 
   return h(NavCtx.Provider, { value: nav }, props.children);

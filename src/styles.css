@@ -31,6 +31,10 @@
   --radius: 10px;
   --tap: 44px;            /* minimum tap target */
   --tabbar-h: 56px;
+  /* Inventory search bar: tap target + its vertical padding + hairline.
+     Shared token so the toast offset below and .inv-view's scroll clearance
+     can never disagree with the bar's real height. */
+  --searchbar-h: calc(var(--tap) + var(--s2) * 2 + 1px);
 }
 
 /* -- reset / base ---------------------------------------------------------- */
@@ -86,6 +90,28 @@ body::after {
    iOS has no browser chrome; a dead-end screen is a force-quit)
    .overlay / .overlay-body — full-screen item-detail layer over the tabs   */
 .view-title { font-size: 22px; font-weight: 700; margin-bottom: var(--s3); }
+/* .sticky-head — opaque sticky screen header: the title (and its caption)
+   pin below the status bar while rows scroll UNDER it and out of sight
+   instead of mingling with the status bar. The safe-area offset lives in
+   `top`, not padding: padding would double the inset at rest (under .app's
+   own safe-area padding), and a compensating negative margin would pull
+   the bar up over the banner stack. The strip above the pinned bar is
+   masked by the kept body::after (same z-band, same ground). Negative side
+   margins run the opaque ground across .content's full width. */
+.sticky-head {
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 25; /* above rows; below the body::after mask (30) and overlays */
+  background: var(--bg);
+  margin: calc(-1 * var(--s4)) calc(-1 * var(--s4)) 0;
+  padding: var(--s3) var(--s4) var(--s2);
+  border-bottom: 1px solid var(--line);
+}
+.sticky-head .view-title { margin-bottom: 0; }
+/* The 44px back target overlaps surrounding whitespace (sheet-close trick)
+   so the header stays compact. */
+.sticky-head .back-btn { display: block; margin: calc(-1 * var(--s2)) 0; }
+.sticky-caption { font-size: 14px; }
 .screen-head {
   display: flex;
   align-items: center;
@@ -162,17 +188,38 @@ body::after {
 .chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
 
 /* -- list rows -------------------------------------------------------------
-   .row — generous one-handed list row; .row-main fills, .row-title /
-   .row-sub are its two text lines. Rows sit directly on the page ground. */
+   .row — compact one-handed list row; .row-main fills, .row-title /
+   .row-sub are its two text lines. Rows sit directly on the page ground.
+   48px keeps a 128-item pantry scannable; the buttons/chips inside still
+   meet the 44px tap floor on their own. */
 .row {
   display: flex;
+  /* wrap: flex items refuse to shrink below min-content, so on 320px-class
+     viewports an unshrinkable control cluster drops to its own line instead
+     of painting over the name. */
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
-  min-height: 56px;
-  padding: var(--s2) 0;
+  min-height: 48px;
+  padding: var(--s1) 0;
   border-bottom: 1px solid var(--line);
 }
-.row-main { flex: 1; min-width: 0; }
+/* The name can NEVER be crushed or painted over by the control cluster: it
+   keeps a small hard floor (~2 lines of 5–6 chars under the clamp), and when
+   the cluster cannot fit beside that it wraps below as one right-aligned
+   unit (.row-controls) with every 44px target intact. The floor is a px
+   value, not a %: it only decides WHEN the wrap triggers, and a wide floor
+   would force two-line rows on viewports that fit fine. */
+.row-main { flex: 1 1 40%; min-width: 88px; }
+/* The qty cluster + overflow toggle as one flex unit: never splits
+   mid-cluster, and margin-left:auto keeps it right-aligned on its own
+   wrapped line. */
+.row-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-left: auto;
+}
 /* The name IS the aisle answer — wrap to two lines rather than truncate
    ("Cheddar ch..." fails the 3-second test). Clamp keeps pathological names
    from eating the row. */
@@ -336,28 +383,33 @@ body::after {
   padding: 0 var(--s2);
   flex-shrink: 0;
 }
+/* When the pinned inventory search bar is present, the toast sits ABOVE it:
+   at z-index 60 vs the bar's 20 it would otherwise cover the bar — and
+   intercept its taps — for 5 s after every write, exactly when a counting
+   pass reaches for search next. (:has() is fine on the iOS 15.4+ baseline
+   this app already assumes; other tabs keep the offset above.) */
+body:has(.inv-searchbar) .toast {
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--searchbar-h) + var(--s4));
+}
 
 /* -- quantity control ------------------------------------------------------
-   .qty wraps marks + control; .qty-marks indicator cluster; .qty-value
-   tappable value (opens absolute entry); .qty-sub secondary both-units
-   text; .qty-form / .qty-input inline decimal entry; .stepper /
-   .stepper-btn / .stepper-value; .ladder chip row                        */
-.qty { display: inline-flex; align-items: center; gap: var(--s2); }
-.qty-marks { display: inline-flex; align-items: center; gap: var(--s1); }
-.qty-value {
-  background: none;
-  border: none;
-  color: var(--ink);
-  font-weight: 600;
-  min-height: var(--tap);
-  padding: 0 var(--s2);
+   .qty wraps marks + control; .qty-marks indicator cluster; .qty-form /
+   .qty-input inline decimal entry; .stepper / .stepper-btn /
+   .stepper-value; .ladder chip row; .qty-rung collapsed ladder chip
+   (+ -unknown dashed variant)                                            */
+/* The control side yields to the name: when it cannot fit beside the name's
+   floor, the whole .row-controls cluster wraps below (see the rows section).
+   .qty's own wrap only reflows the marks against the control within that
+   cluster — the stepper itself is atomic and never gets narrower. */
+.qty {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  line-height: 1.2;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  min-width: 0;
 }
-.qty-sub { font-size: 12px; font-weight: 400; }
+.qty-marks { display: inline-flex; align-items: center; gap: var(--s1); }
 .qty-form { display: inline-flex; }
 .qty-input {
   width: 96px;
@@ -390,7 +442,18 @@ body::after {
   min-height: var(--tap);
   padding: 0 var(--s1);
 }
-.ladder { display: inline-flex; gap: var(--s1); }
+.ladder { display: inline-flex; gap: var(--s1); flex-wrap: wrap; justify-content: flex-end; }
+/* Collapsed ladder: ONE chip carries the current rung; tapping it expands
+   the full rung row in place (components.tsx). Four-chip clusters were
+   crushing item names off the row. */
+.qty-rung { flex-shrink: 0; }
+/* Uncounted ladder item — same dashed-muted voice as .badge-unknown: a zero
+   nobody ever counted is a question, not an "Out" claim. */
+.qty-rung-unknown {
+  background: transparent;
+  border: 1px dashed var(--muted);
+  color: var(--muted);
+}
 
 /* -- forms -----------------------------------------------------------------
    .field-input — standard text input; .create-form — quick-create layout  */
