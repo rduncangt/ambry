@@ -1189,7 +1189,10 @@ export function CreateSheet() {
   /** null = using the chip row; non-null = free-entry text is the unit. */
   const [customUnit, setCustomUnit] = useState<string | null>(null);
   const [qty, setQty] = useState("1");
-  const [location, setLocation] = useState<string | null>(null);
+  // Seeded from where the user is standing (an open location card) so an
+  // item created mid-shelf files to that shelf, not silently to "elsewhere".
+  // The chips below still change or clear it in one tap.
+  const [location, setLocation] = useState<string | null>(nav.createDefaults?.location ?? null);
   const [category, setCategory] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [threshold, setThreshold] = useState("");
