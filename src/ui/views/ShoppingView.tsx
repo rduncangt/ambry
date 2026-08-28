@@ -2,8 +2,9 @@
  * Shopping view (PLAN.md §2 "Shopping view"; M2 flow (b): a 20-item restock
  * in under 2 minutes). Three sections, all derived by the shoppingList
  * selector — list membership is never stored here (§1.6):
- *   TO BUY  — flagged items, oldest flag first; ONE big check-off per row IS
- *             the purchase gesture (§1.2), with the amount correctable first.
+ *   TO BUY  — flagged items in store-aisle order (grouped by category,
+ *             alphabetical within); ONE big check-off per row IS the
+ *             purchase gesture (§1.2), with the amount correctable first.
  *   EXTRAS  — live ad-hoc lines; check-off soft-deletes and offers one-shot
  *             graduation to a real pantry item.
  *   IN CART — today's purchases, dimmed, read-only (derived from events, so
@@ -12,7 +13,7 @@
  */
 import { useState } from "preact/hooks";
 import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, parseDec } from "../../domain/format";
-import { shoppingList } from "../../store/selectors";
+import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
 import { InlineQtyInput, Stepper } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
@@ -34,8 +35,22 @@ export function ShoppingView() {
       ) : (
         <div class="shop-section">
           <h2 class="shop-section-title">To buy</h2>
-          {list.toBuy.map((item) => (
-            <ToBuyRow key={item.id} item={item} nowIso={nowIso} />
+          {/* Store-aisle order: grouped under muted category headers,
+              alphabetical within — the walk goes shelf by shelf, so aisle
+              adjacency beats flag age here. When nothing is categorized
+              there is only the null bucket: a lone "other" header over the
+              whole list would be noise, so it renders headerless. The ""
+              key is collision-free: blank categories fold into the null
+              bucket, so no real group's category can be "". */}
+          {groupByCategory(list.toBuy).map((group, _, groups) => (
+            <div key={group.category ?? ""} class="shop-cat">
+              {(groups.length > 1 || group.category !== null) && (
+                <h3 class="shop-cat-title">{group.category ?? "other"}</h3>
+              )}
+              {group.items.map((item) => (
+                <ToBuyRow key={item.id} item={item} nowIso={nowIso} />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -77,8 +92,7 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
   const [editing, setEditing] = useState(false); // mini stepper open
   const [entering, setEntering] = useState(false); // decimal entry open
 
-  // Flag provenance: auto flags say how long the need has stood (list order
-  // is oldest-first, so the caption explains the ordering too).
+  // Flag provenance: auto flags say how long the need has stood.
   const provenance =
     item.flag_source === "threshold"
       ? `auto · ${fmtAge(item.flagged_at, props.nowIso)}`
