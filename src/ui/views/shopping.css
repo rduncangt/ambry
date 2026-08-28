@@ -13,6 +13,18 @@
 }
 .shop-empty { color: var(--muted); padding: var(--s3) 0; }
 
+/* Store-aisle category headers inside To Buy: one quiet voice down from the
+   section title (no uppercase — these are the user's own words, "dairy",
+   not app chrome), enough to mark the shelf boundary on a walk without
+   competing with item names. */
+.shop-cat-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: var(--s3) 0 0;
+}
+.shop-cat:first-of-type .shop-cat-title { margin-top: var(--s1); }
+
 /* -- the ONE BIG check-off target ------------------------------------------
    Oversized on purpose: flow (b) is 20 check-offs mid-aisle, one-handed. */
 .shop-check {
