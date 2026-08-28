@@ -10,9 +10,13 @@ import {
 import { emptyDoc } from "./doc";
 import {
   STALE_DAYS,
+  attentionItems,
   exportNag,
-  groupedInventory,
+  isLow,
+  isUncounted,
+  itemsInLocation,
   liveItems,
+  locationSummaries,
   resolveVocabValue,
   shoppingList,
   staleCount,
@@ -198,29 +202,153 @@ describe("shoppingList — inCart (purchases since LOCAL midnight)", () => {
   });
 });
 
-describe("groupedInventory", () => {
-  it("groups live items by location, alphabetical within, null -> 'elsewhere' last", () => {
+describe("isUncounted", () => {
+  const cases: { name: string; over: Partial<Item>; want: boolean }[] = [
+    { name: "zero never verified -> uncounted", over: { quantity: 0, verified_at: null }, want: true },
+    { name: "zero a human confirmed -> a real Out, not uncounted", over: { quantity: 0, verified_at: NOW }, want: false },
+    { name: "nonzero never verified -> counted (seeded with a number)", over: { quantity: 2, verified_at: null }, want: false },
+    { name: "nonzero and verified -> counted", over: { quantity: 1, verified_at: NOW }, want: false },
+  ];
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(isUncounted(makeItem(c.over))).toBe(c.want);
+    });
+  }
+});
+
+describe("isLow", () => {
+  const cases: { name: string; over: Partial<Item>; want: boolean }[] = [
+    { name: "below threshold -> low", over: { quantity: 0.5, threshold: 1 }, want: true },
+    { name: "exactly at threshold -> low (<= rule)", over: { quantity: 1, threshold: 1 }, want: true },
+    { name: "above threshold -> not low", over: { quantity: 2, threshold: 1 }, want: false },
+    { name: "no threshold -> never low, even at zero", over: { quantity: 0, verified_at: NOW, threshold: null }, want: false },
+    { name: "verified zero under threshold -> low", over: { quantity: 0, verified_at: NOW, threshold: 1 }, want: true },
+    { name: "uncounted zero under threshold -> NOT low (a question, not a shortage)", over: { quantity: 0, verified_at: null, threshold: 1 }, want: false },
+    { name: "soft-deleted -> not low", over: { quantity: 0, verified_at: NOW, threshold: 1, deleted_at: NOW }, want: false },
+  ];
+  for (const c of cases) {
+    it(c.name, () => {
+      expect(isLow(makeItem(c.over))).toBe(c.want);
+    });
+  }
+});
+
+describe("attentionItems", () => {
+  it("flagged first (oldest flagged_at first), then unflagged low by name", () => {
+    const lowB = makeItem({ name: "butter", quantity: 1, threshold: 1, verified_at: NOW });
+    const lowA = makeItem({ name: "Anchovies", quantity: 0.5, threshold: 1, verified_at: NOW });
+    const flaggedNew = makeItem({ flagged: true, flagged_at: "2026-08-20T00:00:00.000Z" });
+    const flaggedOld = makeItem({ flagged: true, flagged_at: "2026-08-10T00:00:00.000Z" });
+    const fine = makeItem({ quantity: 5, threshold: 1 });
+    const doc = makeDoc({ items: [lowB, flaggedNew, fine, lowA, flaggedOld] });
+    // Case-insensitive alpha inside the low tail.
+    expect(attentionItems(doc)).toEqual([flaggedOld, flaggedNew, lowA, lowB]);
+  });
+
+  it("an item both flagged and low appears once, in the flagged section", () => {
+    const both = makeItem({ flagged: true, flagged_at: NOW, quantity: 0.5, threshold: 1, verified_at: NOW });
+    expect(attentionItems(makeDoc({ items: [both] }))).toEqual([both]);
+  });
+
+  it("includes a flagged item even while uncounted — a flag is a human act", () => {
+    // Flagging is one deliberate tap on the ⋯ toggle; hiding it here while
+    // the Shopping badge counts it would make the two disagree.
+    const flaggedUncounted = makeItem({ flagged: true, flagged_at: NOW, quantity: 0, verified_at: null });
+    expect(attentionItems(makeDoc({ items: [flaggedUncounted] }))).toEqual([flaggedUncounted]);
+  });
+
+  const excluded: { name: string; over: Partial<Item> }[] = [
+    { name: "uncounted item, even with a threshold above zero", over: { quantity: 0, verified_at: null, threshold: 1 } },
+    { name: "soft-deleted flagged item", over: { flagged: true, flagged_at: NOW, deleted_at: NOW } },
+    { name: "healthy item (no flag, above threshold)", over: { quantity: 5, threshold: 1 } },
+  ];
+  for (const c of excluded) {
+    it(`never contains a ${c.name}`, () => {
+      expect(attentionItems(makeDoc({ items: [makeItem(c.over)] }))).toEqual([]);
+    });
+  }
+});
+
+describe("locationSummaries", () => {
+  it("orders physical shelves first, then others alphabetically, null bucket last", () => {
     const items = [
-      makeItem({ name: "Yeast", location: "pantry" }),
-      makeItem({ name: "apples", location: null }),
-      makeItem({ name: "butter", location: "fridge" }),
-      makeItem({ name: "anchovies", location: "pantry" }),
-      makeItem({ name: "peas", location: "Freezer" }),
-      makeItem({ name: "old jam", location: "pantry", deleted_at: NOW }),
+      makeItem({ location: "garage" }),
+      makeItem({ location: null }),
+      makeItem({ location: "freezer" }),
+      makeItem({ location: "cellar" }),
+      makeItem({ location: "pantry" }),
+      makeItem({ location: "fridge" }),
+      makeItem({ location: "countertop" }),
     ];
-    const groups = groupedInventory(makeDoc({ items }));
-    expect(groups.map((g) => g.location)).toEqual(["Freezer", "fridge", "pantry", "elsewhere"]);
-    expect(groups.map((g) => g.items.map((i) => i.name))).toEqual([
-      ["peas"],
-      ["butter"],
-      ["anchovies", "Yeast"], // case-insensitive alpha within
-      ["apples"],
+    expect(locationSummaries(makeDoc({ items })).map((s) => s.location)).toEqual([
+      "pantry",
+      "fridge",
+      "freezer",
+      "countertop",
+      "cellar",
+      "garage",
+      null,
     ]);
   });
 
-  it("returns no groups for an empty or all-deleted doc", () => {
-    expect(groupedInventory(makeDoc())).toEqual([]);
-    expect(groupedInventory(makeDoc({ items: [makeItem({ deleted_at: NOW })] }))).toEqual([]);
+  it("ranks physical shelves case-insensitively (iOS-capitalized seeds still walk in order)", () => {
+    const items = [makeItem({ location: "attic" }), makeItem({ location: "Fridge" })];
+    expect(locationSummaries(makeDoc({ items })).map((s) => s.location)).toEqual([
+      "Fridge",
+      "attic",
+    ]);
+  });
+
+  it("counts total/counted/low/flagged/uncounted per location over live items only", () => {
+    const items = [
+      makeItem({ location: "pantry", quantity: 2, verified_at: NOW }),
+      makeItem({ location: "pantry", quantity: 0, verified_at: null }), // uncounted
+      makeItem({ location: "pantry", quantity: 1, threshold: 1, verified_at: NOW }), // low
+      makeItem({ location: "pantry", flagged: true, flagged_at: NOW }),
+      makeItem({ location: "pantry", deleted_at: NOW }), // tombstone: invisible
+      makeItem({ location: "fridge", quantity: 0, verified_at: null, flagged: true, flagged_at: NOW }),
+    ];
+    expect(locationSummaries(makeDoc({ items }))).toEqual([
+      { location: "pantry", total: 4, counted: 3, low: 1, flagged: 1, uncounted: 1 },
+      // Uncounted-but-flagged: counts as uncounted AND flagged, never low.
+      { location: "fridge", total: 1, counted: 0, low: 0, flagged: 1, uncounted: 1 },
+    ]);
+  });
+
+  it("is empty for an empty or all-deleted doc", () => {
+    expect(locationSummaries(makeDoc())).toEqual([]);
+    expect(locationSummaries(makeDoc({ items: [makeItem({ deleted_at: NOW })] }))).toEqual([]);
+  });
+});
+
+describe("itemsInLocation", () => {
+  it("splits one location's live items into counted/uncounted, each case-insensitive alpha", () => {
+    const items = [
+      makeItem({ name: "Yeast", location: "pantry", quantity: 1 }),
+      makeItem({ name: "anchovies", location: "pantry", quantity: 2 }),
+      makeItem({ name: "rice", location: "pantry", quantity: 0, verified_at: null }),
+      makeItem({ name: "Flour", location: "pantry", quantity: 0, verified_at: null }),
+      makeItem({ name: "butter", location: "fridge", quantity: 1 }),
+      makeItem({ name: "old jam", location: "pantry", deleted_at: NOW }),
+    ];
+    const split = itemsInLocation(makeDoc({ items }), "pantry");
+    expect(split.counted.map((i) => i.name)).toEqual(["anchovies", "Yeast"]);
+    expect(split.uncounted.map((i) => i.name)).toEqual(["Flour", "rice"]);
+  });
+
+  it("null selects the elsewhere bucket (location === null) only", () => {
+    const nowhere = makeItem({ name: "string", location: null, quantity: 1 });
+    const filed = makeItem({ name: "flour", location: "pantry", quantity: 1 });
+    const split = itemsInLocation(makeDoc({ items: [nowhere, filed] }), null);
+    expect(split.counted).toEqual([nowhere]);
+    expect(split.uncounted).toEqual([]);
+  });
+
+  it("a verified zero counts as counted (it is a real Out, not a seed)", () => {
+    const out = makeItem({ name: "milk", location: "fridge", quantity: 0, verified_at: NOW });
+    const split = itemsInLocation(makeDoc({ items: [out] }), "fridge");
+    expect(split.counted).toEqual([out]);
+    expect(split.uncounted).toEqual([]);
   });
 });
 
