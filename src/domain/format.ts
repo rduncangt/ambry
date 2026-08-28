@@ -19,6 +19,10 @@ const SYMBOL_UNITS = new Set(["g", "kg", "mg", "ml", "l", "oz"]);
  *  must never render. */
 const COUNT_UNITS = new Set(["count", "each", "ea"]);
 
+/** Irregular plurals the suffix tiers would mangle ("2 loafs" shipped).
+ *  Keyed by normalized unit; consulted before the -es/-s rules. */
+const IRREGULAR_PLURALS: Record<string, string> = { loaf: "loaves" };
+
 /** Rung display text — exported so every rung chip/label in the UI says the same word. */
 export const RUNG_LABELS: Record<LadderRung, string> = {
   full: "Full",
@@ -56,6 +60,15 @@ export function fmtQtyUnit(qty: number, unit: string): string {
   const plural =
     q !== "1" && /^[a-z]+$/i.test(u) && !nu.endsWith("s") && !SYMBOL_UNITS.has(nu);
   if (!plural) return `${q} ${u}`;
+  // Irregulars first — no suffix rule turns "loaf" into "loaves". A leading
+  // capital survives ("Loaf" -> "Loaves"); the map itself stays lowercase.
+  const irregular = IRREGULAR_PLURALS[nu];
+  if (irregular !== undefined) {
+    const cased = /^[A-Z]/.test(u)
+      ? irregular.charAt(0).toUpperCase() + irregular.slice(1)
+      : irregular;
+    return `${q} ${cased}`;
+  }
   // English needs -es after sibilant-ish endings (bunch -> bunches,
   // box -> boxes); everything else keeps the naive +s. Units ending in "s"
   // were already excluded above, so no "glass" special case is needed.

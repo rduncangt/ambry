@@ -1352,3 +1352,40 @@ describe("updateSettings", () => {
     expect(store.getDoc().settings.writes_since_export).toBe(2);
   });
 });
+
+describe("undoQuantity verified_at restore", () => {
+  it("undoing a first observation un-counts the item (verified_at back to null)", () => {
+    const { store } = fresh();
+    const item = store.createItem({ name: "Kiwi" });
+    expect(item.verified_at).toBeNull();
+    store.setQuantity(item.id, 3); // first observation stamps verified_at
+    expect(item.verified_at).not.toBeNull();
+    store.undoQuantity(item.id, 0, {
+      flagged: false, flag_source: null, flagged_at: null, verified_at: null,
+    });
+    expect(item.quantity).toBe(0);
+    expect(item.verified_at).toBeNull(); // back to "?" — not a false Out
+  });
+
+  it("zero-out undo restores the PRIOR stamp, not now", () => {
+    const t0 = "2026-01-01T00:00:00.000Z";
+    const { store } = fresh();
+    const item = store.createItem({ name: "Rice" });
+    item.verified_at = t0; // walked the shelf long ago
+    store.setQuantity(item.id, 0); // reconcile zero-out stamps a fresh time
+    expect(item.verified_at).not.toBe(t0);
+    store.undoQuantity(item.id, 2, {
+      flagged: false, flag_source: null, flagged_at: null, verified_at: t0,
+    });
+    expect(item.verified_at).toBe(t0); // stale-list standing restored
+  });
+
+  it("a snapshot without verified_at leaves the stamp untouched", () => {
+    const { store } = fresh();
+    const item = store.createItem({ name: "Oats", quantity: 2 });
+    store.setQuantity(item.id, 5);
+    const stamped = item.verified_at;
+    store.undoQuantity(item.id, 2, { flagged: false, flag_source: null, flagged_at: null });
+    expect(item.verified_at).toBe(stamped);
+  });
+});
