@@ -82,7 +82,11 @@ body::after {
   z-index: 30;
   pointer-events: none;
 }
-.banners { display: flex; flex-direction: column; }
+/* Banners scroll away with the page (fine — they are nags, not chrome), but
+   the stack needs its own opaque ground: a partially-scrolled banner slice
+   must read as the edge of a surface sliding under the sticky header, not
+   as a line of text floating loose on the cream page. */
+.banners { display: flex; flex-direction: column; background: var(--bg); }
 
 /* -- view scaffolding ------------------------------------------------------
    .view / .view-title — a tab screen and its heading
@@ -196,10 +200,12 @@ body::after {
   display: flex;
   /* wrap: flex items refuse to shrink below min-content, so on 320px-class
      viewports an unshrinkable control cluster drops to its own line instead
-     of painting over the name. */
+     of painting over the name. row-gap 0: when the cluster does wrap, its
+     44px targets already carry their own height — an extra 8px between the
+     lines read as a tall dead band in the row. */
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--s2);
+  gap: 0 var(--s2);
   min-height: 48px;
   padding: var(--s1) 0;
   border-bottom: 1px solid var(--line);
@@ -207,10 +213,30 @@ body::after {
 /* The name can NEVER be crushed or painted over by the control cluster: it
    keeps a small hard floor (~2 lines of 5–6 chars under the clamp), and when
    the cluster cannot fit beside that it wraps below as one right-aligned
-   unit (.row-controls) with every 44px target intact. The floor is a px
-   value, not a %: it only decides WHEN the wrap triggers, and a wide floor
-   would force two-line rows on viewports that fit fine. */
-.row-main { flex: 1 1 40%; min-width: 88px; }
+   unit (.row-controls) with every 44px target intact.
+
+   flex-basis MUST equal the floor, not a %: flex line-breaking uses the
+   hypothetical (basis-clamped) size, never the shrunk one, so a 40% basis
+   made a SHORT name claim 40% of the row and shoved a cluster that fit in
+   the leftover onto its own line. The numbers (16px SF Pro, ~9px/digit
+   tabular, ~8px/letter; row = viewport − 2×16 content padding; cluster =
+   stepper 44+4+value+4+44, +17 for the flag dot on flagged rows, +8 gap
+   +40 cart slot (44 − 4 overlap margin)):
+
+   390pt phone, row 358px —
+   · attention row (caption + flag dot), value "2" (min-width 44):
+     cluster 205 → 88+8+205 = 301 ≤ 358, one line
+     (old 40% basis: 143+8+205 = 356 ≤ 358, one line — but…)
+   · attention row, value "0.2 jars" (~70px): cluster 231
+     → 88+8+231 = 327 ≤ 358, one line
+     (old 40% basis: 143+8+231 = 382 > 358 — the Bananas misfire)
+   · location row (no caption, no dot), "0.2 jars": cluster 214
+     → 88+8+214 = 310 ≤ 358, one line
+   320pt phone, row 288px —
+   · attention row, value "10 bottles" (~88px): cluster 249
+     → 88+8+249 = 345 > 288, wraps — genuine: even the bare 88px floor
+     leaves only 192px for a 249px cluster. */
+.row-main { flex: 1 1 88px; min-width: 88px; }
 /* The qty cluster + overflow toggle as one flex unit: never splits
    mid-cluster, and margin-left:auto keeps it right-aligned on its own
    wrapped line. */
@@ -445,8 +471,36 @@ body:has(.inv-searchbar) .toast {
 .ladder { display: inline-flex; gap: var(--s1); flex-wrap: wrap; justify-content: flex-end; }
 /* Collapsed ladder: ONE chip carries the current rung; tapping it expands
    the full rung row in place (components.tsx). Four-chip clusters were
-   crushing item names off the row. */
-.qty-rung { flex-shrink: 0; }
+   crushing item names off the row.
+
+   The chip is a CONTROL, not a status pill: a solid 44px accent oval read
+   as a giant badge and towered over the stepper buttons beside it. So —
+   outline + accent text at a visual 36px (the steppers' visual family),
+   with the 44px hit area restored by an invisible ::before overlay (the
+   sheet-close/back-btn trick, vertically). Filled .chip-active stays the
+   voice of the EXPANDED rung row, where selection state is the point. */
+.qty-rung {
+  /* A one-glyph "?" chip is ~35px wide — a rightward miss would land on the
+     cart button and silently flag the item. Floor the width at the tap size. */
+  min-width: var(--tap);
+
+  flex-shrink: 0;
+  position: relative;
+  min-height: 36px;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 15px;
+}
+.qty-rung::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* (36 − 44) / 2 = −4px above and below: a centered 44px tap band. */
+  top: calc((36px - var(--tap)) / 2);
+  bottom: calc((36px - var(--tap)) / 2);
+}
 /* Uncounted ladder item — same dashed-muted voice as .badge-unknown: a zero
    nobody ever counted is a question, not an "Out" claim. */
 .qty-rung-unknown {

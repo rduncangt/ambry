@@ -155,12 +155,15 @@
   color: var(--muted);
 }
 
-/* Compact-LOOKING overflow target: the manual flag toggle. It sits 8px from
-   the stepper's 44px "+" in the densest tap area of the app, so the hit box
-   is the full 44px; the negative margin overlaps the row's right-edge
-   whitespace (rows have no horizontal padding, nothing tappable lives
-   there) — the sheet-close/back-btn trick — so the row stays visually
-   compact. */
+/* Compact-LOOKING cart target: the manual flag toggle, honest about what it
+   does (a ⋯ here promised a menu that never existed). ~20px stroke glyph;
+   it sits 8px from the stepper's 44px "+" in the densest tap area of the
+   app, so the hit box is the full 44px; the negative margin overlaps the
+   row's right-edge whitespace (rows have no horizontal padding, nothing
+   tappable lives there) — the sheet-close/back-btn trick — so the row
+   stays visually compact. Outline+muted = not on the list; the -on state
+   fills the basket in accent (CartIcon) so flagged rows read at a glance
+   against the cream ground. */
 .inv-more {
   background: none;
   border: none;
@@ -168,9 +171,14 @@
   width: var(--tap);
   margin-right: calc(-1 * var(--s1));
   min-height: var(--tap);
-  font-size: 20px;
   flex-shrink: 0;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.inv-more-on {
+  color: var(--accent);
 }
 
 /* Cap the stepper's value in list rows so one long label ("10 bottles")

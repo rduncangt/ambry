@@ -10,7 +10,14 @@ import { toPreciseUnit } from "./units";
 const normUnit = (u: string): string => u.trim().toLowerCase();
 
 /** Metric-ish symbols never pluralize: "432 g", not "432 gs". */
-const METRIC_UNITS = new Set(["g", "kg", "mg", "ml", "l"]);
+// Symbols and abbreviations that never take a plural suffix: metric units
+// plus "oz", which the sibilant -es rule would otherwise mangle to "ozes".
+const SYMBOL_UNITS = new Set(["g", "kg", "mg", "ml", "l", "oz"]);
+
+/** Pseudo-units that mean "just a number of them": 3 count of eggs is "3",
+ *  and "each"/"ea" (grocery-receipt vocabulary) is the same idea — "2 eaches"
+ *  must never render. */
+const COUNT_UNITS = new Set(["count", "each", "ea"]);
 
 /** Rung display text — exported so every rung chip/label in the UI says the same word. */
 export const RUNG_LABELS: Record<LadderRung, string> = {
@@ -34,19 +41,20 @@ export function fmtQty(n: number): string {
 /**
  * Naive pluralized unit: alphabetic units gain "s" when qty !== 1 unless they
  * already end in "s" or are metric-ish symbols (g, kg, ml, l, count as bare
- * number). "2 bag" -> "2 bags"; "432 g" stays. unit "count" renders bare: "3".
+ * number). "2 bag" -> "2 bags"; "432 g" stays. Count-family units
+ * (count/each/ea) render bare: "3".
  */
 export function fmtQtyUnit(qty: number, unit: string): string {
   const q = fmtQty(qty);
   const u = unit.trim();
   const nu = normUnit(unit);
-  // "count" is a pseudo-unit — 3 count of eggs is just "3". An empty unit
-  // likewise renders as the bare number.
-  if (nu === "count" || u === "") return q;
+  // Count-family pseudo-units — 3 count (or each) of eggs is just "3". An
+  // empty unit likewise renders as the bare number.
+  if (COUNT_UNITS.has(nu) || u === "") return q;
   // Pluralize on the DISPLAYED value, not the raw one, so a float hair above
   // 1 (shown as "1") never reads "1 bags".
   const plural =
-    q !== "1" && /^[a-z]+$/i.test(u) && !nu.endsWith("s") && !METRIC_UNITS.has(nu);
+    q !== "1" && /^[a-z]+$/i.test(u) && !nu.endsWith("s") && !SYMBOL_UNITS.has(nu);
   if (!plural) return `${q} ${u}`;
   // English needs -es after sibilant-ish endings (bunch -> bunches,
   // box -> boxes); everything else keeps the naive +s. Units ending in "s"
