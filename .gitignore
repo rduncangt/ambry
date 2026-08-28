@@ -8,3 +8,7 @@ first_items.md
 
 # real exports from the app must never be committed (personal data)
 ambry-backup-*.json
+
+# screenshots dropped into the repo for review sessions
+[Ss]creenshot*
+ambry-mobile-screenshot-*

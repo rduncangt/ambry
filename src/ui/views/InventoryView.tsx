@@ -186,7 +186,18 @@ export function InventoryView() {
 /** Default state: the attention section, then one card per location. */
 function PantryHome(props: { onOpen: (location: string | null) => void }) {
   const doc = useDoc();
-  const attention = attentionItems(doc);
+  // Membership is snapshotted on mount (same invariant as splitByVisit): a +
+  // tap that lifts a low item above threshold keeps its row in place showing
+  // the new value instead of vanishing mid-burst and shifting the next row
+  // under the finger. Newly low/flagged items still append live; deleted ones
+  // drop; the list re-derives on the next visit to this screen.
+  const [attentionIds] = useState(() => new Set(attentionItems(doc).map((i) => i.id)));
+  const live = attentionItems(doc);
+  for (const item of live) attentionIds.add(item.id);
+  const byId = new Map(doc.items.map((i) => [i.id, i]));
+  const attention = [...attentionIds]
+    .map((id) => byId.get(id))
+    .filter((i): i is Item => i !== undefined && i.deleted_at === null);
   const summaries = locationSummaries(doc);
 
   return (
@@ -283,7 +294,7 @@ function LocationItems(props: {
         </li>
       )}
       {props.showUncounted &&
-        uncounted.map((item) => <ItemRow key={item.id} item={item} caption={null} />)}
+        uncounted.map((item) => <ItemRow key={item.id} item={item} caption={null} holdUnknownSlot />)}
     </ul>
   );
 }
@@ -373,16 +384,43 @@ function SearchResults(props: {
   );
 }
 
+/** Stroke-style cart glyph (currentColor, ~20px in the 44px hit box). The
+ *  basket fills when the item is on the list — the ONLY state signal the
+ *  row carries for the flag, so it must read at a glance against cream. */
+function CartIcon(props: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 4h2.2L7 14.5h10.4L19.6 7H5.8" fill={props.filled ? "currentColor" : "none"} />
+      <circle cx="8.5" cy="19.5" r="1.4" fill={props.filled ? "currentColor" : "none"} />
+      <circle cx="16.5" cy="19.5" r="1.4" fill={props.filled ? "currentColor" : "none"} />
+    </svg>
+  );
+}
+
 /** One live item: name area opens the detail overlay; QtyControl answers and
- *  writes in place (and owns the flag dot / 🔕 / Out badge / undo toast);
- *  the compact ⋯ target toggles the manual shopping flag. */
-function ItemRow(props: { item: Item; caption: string | null }) {
+ *  writes in place (and owns the 🔕 / Out badge / undo toast); the cart
+ *  target toggles the manual shopping flag AND carries the flag state (its
+ *  filled/outline basket), so the row's flag-dot mark is suppressed —
+ *  Shopping/Reconcile rows, which have no cart control, keep the dot. */
+function ItemRow(props: { item: Item; caption: string | null; holdUnknownSlot?: boolean }) {
   const store = useStore();
   const nav = useNav();
   const toast = useToast();
   const item = props.item;
 
-  const flagLabel = item.flagged ? "Clear shopping flag" : "Flag for shopping";
+  const flagLabel = item.flagged
+    ? "On the shopping list — tap to remove"
+    : "Add to shopping list";
   const toggleFlag = (): void => {
     // One tap each way keeps this reversible without an undo closure.
     if (item.flagged) {
@@ -404,15 +442,16 @@ function ItemRow(props: { item: Item; caption: string | null }) {
           right-aligned unit on narrow viewports (styles.css .row-controls)
           instead of the stepper overflowing onto the name. */}
       <span class="row-controls">
-        <QtyControl item={item} brief />
+        <QtyControl item={item} brief hideFlag holdUnknownSlot={props.holdUnknownSlot} />
         <button
-          class="inv-more"
+          class={`inv-more${item.flagged ? " inv-more-on" : ""}`}
           type="button"
           title={flagLabel}
           aria-label={flagLabel}
+          aria-pressed={item.flagged}
           onClick={toggleFlag}
         >
-          ⋯
+          <CartIcon filled={item.flagged} />
         </button>
       </span>
     </li>

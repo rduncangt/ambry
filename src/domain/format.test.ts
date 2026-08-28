@@ -82,6 +82,9 @@ describe("fmtQtyUnit", () => {
     // already ends in "s": never doubled
     [2, "oats", "2 oats"],
     // metric-ish symbols stay bare of the plural
+    [2, "oz", "2 oz"],
+    [1, "oz", "1 oz"],
+    [2, "Oz", "2 Oz"],
     [432, "g", "432 g"],
     [2, "kg", "2 kg"],
     [500, "ml", "500 ml"],
@@ -90,6 +93,13 @@ describe("fmtQtyUnit", () => {
     [3, "count", "3"],
     [1, "count", "1"],
     [3, "Count", "3"],
+    // "each"/"ea" are count-family too — never "2 eaches"
+    [2, "each", "2"],
+    [1, "each", "1"],
+    [2, "ea", "2"],
+    [1, "ea", "1"],
+    [2, "Each", "2"],
+    [1, "Each", "1"],
     // non-alphabetic units don't pluralize
     [2, "fl oz", "2 fl oz"],
     // empty unit renders bare
