@@ -15,7 +15,7 @@ import { useState } from "preact/hooks";
 import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, parseDec } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
-import { InlineQtyInput, Stepper } from "../components";
+import { InlineQtyInput, qtyLines, Stepper } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./shopping.css";
 
@@ -107,6 +107,7 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
       flagged: item.flagged,
       flag_source: item.flag_source,
       flagged_at: item.flagged_at,
+      verified_at: item.verified_at,
     };
     store.purchase(item.id, pending);
     // QtyControl's toast pattern: the store mutated `item` in place, so
@@ -142,7 +143,8 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
     ) : (
       <>
         <Stepper
-          value={fmtQtyUnit(pending, item.unit)}
+          value={qtyLines(pending, item.unit).num}
+          unit={qtyLines(pending, item.unit).unit}
           onDelta={(d) => setPending((p) => Math.max(0, p + d))}
           onTapValue={() => setEntering(true)}
         />

@@ -143,6 +143,7 @@ export function ReconcileView() {
       flagged: item.flagged,
       flag_source: item.flag_source,
       flagged_at: item.flagged_at,
+      verified_at: item.verified_at,
     };
     // A recount to 0: the human looked and it wasn't there. Stamps
     // verified_at inside the store — absence confirmed is still confirmed.
