@@ -19,7 +19,7 @@
   --line: #e6dccc;        /* hairline borders */
   --accent-soft: #f1e6d7; /* info banner ground */
   --warn-soft: #f7ecd2;   /* warn banner ground */
-  --danger-soft: #f6ded9; /* out-badge ground */
+  --danger-soft: #f6ded9; /* danger panel ground (stale-import warning) */
 
   /* spacing scale */
   --s1: 4px;
@@ -218,24 +218,21 @@ body::after {
    flex-basis MUST equal the floor, not a %: flex line-breaking uses the
    hypothetical (basis-clamped) size, never the shrunk one, so a 40% basis
    made a SHORT name claim 40% of the row and shoved a cluster that fit in
-   the leftover onto its own line. The numbers (16px SF Pro, ~9px/digit
-   tabular, ~8px/letter; row = viewport − 2×16 content padding; cluster =
-   stepper 44+4+value+4+44, +17 for the flag dot on flagged rows, +8 gap
-   +40 cart slot (44 − 4 overlap margin)):
+   the leftover onto its own line. The numbers (16px SF Pro; row = viewport
+   − 2×16 content padding; the stacked stepper value is a FIXED 52–76px
+   column, so unit length no longer moves the cluster; cluster = stepper
+   44+4+(52–76)+4+44 = 148–172, +17 for the flag dot on flagged rows,
+   +8 gap +40 cart slot (44 − 4 overlap margin)):
 
    390pt phone, row 358px —
-   · attention row (caption + flag dot), value "2" (min-width 44):
-     cluster 205 → 88+8+205 = 301 ≤ 358, one line
-     (old 40% basis: 143+8+205 = 356 ≤ 358, one line — but…)
-   · attention row, value "0.2 jars" (~70px): cluster 231
-     → 88+8+231 = 327 ≤ 358, one line
-     (old 40% basis: 143+8+231 = 382 > 358 — the Bananas misfire)
-   · location row (no caption, no dot), "0.2 jars": cluster 214
-     → 88+8+214 = 310 ≤ 358, one line
+   · attention row (caption + flag dot), widest value column: cluster 237
+     → 88+8+237 = 333 ≤ 358, one line — every unit, every value
+   · location row (no caption, no dot): cluster 220
+     → 88+8+220 = 316 ≤ 358, one line
    320pt phone, row 288px —
-   · attention row, value "10 bottles" (~88px): cluster 249
-     → 88+8+249 = 345 > 288, wraps — genuine: even the bare 88px floor
-     leaves only 192px for a 249px cluster. */
+   · attention row, even the narrowest cluster 213
+     → 88+8+213 = 309 > 288, wraps — genuine: the bare 88px floor
+     leaves only 192px for a 213px cluster. */
 .row-main { flex: 1 1 88px; min-width: 88px; }
 /* The qty cluster + overflow toggle as one flex unit: never splits
    mid-cluster, and margin-left:auto keeps it right-aligned on its own
@@ -258,26 +255,10 @@ body::after {
 }
 .row-sub { font-size: 14px; color: var(--muted); }
 
-/* -- badges & markers ------------------------------------------------------
-   .badge — small status pill; .badge-out — the zero-quantity state
+/* -- markers ---------------------------------------------------------------
    .flag-dot — flagged-for-shopping marker; .nobell — never_prompt marker
-   .muted — secondary-text utility                                        */
-.badge {
-  display: inline-block;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--line);
-  color: var(--ink);
-}
-.badge-out { background: var(--danger-soft); color: var(--danger); }
-/* Zero nobody ever counted — dashed and muted, not a red claim. */
-.badge-unknown {
-  background: transparent;
-  border: 1px dashed var(--muted);
-  color: var(--muted);
-}
+   .muted — secondary-text utility. (The old Out/? badge pills are gone:
+   zero states live in the stepper value itself — see .stepper-out/-unknown.) */
 .flag-dot {
   display: inline-block;
   width: 9px;
@@ -383,45 +364,63 @@ body::after {
 }
 
 /* -- toast -----------------------------------------------------------------
-   Single toast fixed above the tab bar; .toast-msg / .toast-undo          */
+   Single slim tap-through notice docked at the very top of the viewport;
+   .toast-msg left / .toast-undo right. A floating card near the bottom
+   parked itself exactly on the controls the user just tapped — this line
+   lives in the one strip with no controls, and pointer-events: none means
+   it can NEVER block one; only the Undo button restores pointer-events.
+   .toast-leaving is the exit phase (hooks.ts unmounts after the slide). */
 .toast {
   position: fixed;
-  left: var(--s4);
-  right: var(--s4);
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--s4));
+  top: env(safe-area-inset-top);
+  left: 0;
+  right: 0;
   z-index: 60;
   display: flex;
   align-items: center;
   gap: var(--s3);
+  min-height: 32px;
   background: var(--ink);
   color: var(--bg);
-  padding: var(--s3) var(--s4);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 16px rgba(43, 32, 21, 0.3);
+  font-size: 13px;
+  padding: var(--s1) var(--s4);
+  pointer-events: none;
+  animation: toast-in 150ms ease-out;
+}
+.toast-leaving { animation: toast-out 150ms ease-in forwards; }
+/* Fade rides the slide so the line never crosses the status-bar strip
+   (above the safe-area inset) at full ink. */
+@keyframes toast-in {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes toast-out {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(-100%); opacity: 0; }
 }
 .toast-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Small gold word, full 44px hit area: min-height grows the target and the
+   negative vertical margins ((32 − 44) / 2) give the growth back so the bar
+   stays slim (the sheet-close/back-btn trick). pointer-events: auto is the
+   ONE exception to the container's tap-through rule. */
 .toast-undo {
+  pointer-events: auto;
   background: none;
   border: none;
   color: #eec388;
   font-weight: 700;
+  font-size: 13px;
   min-height: var(--tap);
-  padding: 0 var(--s2);
+  padding: 0 var(--s3);
+  margin: calc((32px - var(--tap)) / 2) calc(-1 * var(--s2)) calc((32px - var(--tap)) / 2) 0;
   flex-shrink: 0;
-}
-/* When the pinned inventory search bar is present, the toast sits ABOVE it:
-   at z-index 60 vs the bar's 20 it would otherwise cover the bar — and
-   intercept its taps — for 5 s after every write, exactly when a counting
-   pass reaches for search next. (:has() is fine on the iOS 15.4+ baseline
-   this app already assumes; other tabs keep the offset above.) */
-body:has(.inv-searchbar) .toast {
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--searchbar-h) + var(--s4));
 }
 
 /* -- quantity control ------------------------------------------------------
    .qty wraps marks + control; .qty-marks indicator cluster; .qty-form /
    .qty-input inline decimal entry; .stepper / .stepper-btn /
-   .stepper-value; .ladder chip row; .qty-rung collapsed ladder chip
+   .stepper-value (.stepper-num over .stepper-unit, + -out/-unknown value
+   states); .ladder chip row; .qty-rung collapsed ladder chip
    (+ -unknown dashed variant)                                            */
 /* The control side yields to the name: when it cannot fit beside the name's
    floor, the whole .row-controls cluster wraps below (see the rows section).
@@ -458,8 +457,17 @@ body:has(.inv-searchbar) .toast {
   line-height: 1;
 }
 .stepper-btn:active { filter: brightness(0.95); }
+/* Stacked value — number over a small muted unit line, ONE tap target. A
+   flat "0 cartons" between the buttons blew the row width on long units and
+   forced ugly double-height wraps; stacking pins the column to a fixed
+   narrow band, so cluster width no longer depends on the unit's length. */
 .stepper-value {
-  min-width: 44px;
+  min-width: 52px;
+  max-width: 76px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -467,7 +475,24 @@ body:has(.inv-searchbar) .toast {
   border: none;
   min-height: var(--tap);
   padding: 0 var(--s1);
+  line-height: 1.2;
 }
+.stepper-num,
+.stepper-unit {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stepper-unit {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+/* Zero states live IN the value line, sharing the ladder chip's vocabulary
+   (Out / ?) — quiet text, not a pill shouting beside the control. */
+.stepper-out { color: var(--danger); }
+.stepper-unknown { color: var(--muted); }
 .ladder { display: inline-flex; gap: var(--s1); flex-wrap: wrap; justify-content: flex-end; }
 /* Collapsed ladder: ONE chip carries the current rung; tapping it expands
    the full rung row in place (components.tsx). Four-chip clusters were
@@ -501,7 +526,7 @@ body:has(.inv-searchbar) .toast {
   top: calc((36px - var(--tap)) / 2);
   bottom: calc((36px - var(--tap)) / 2);
 }
-/* Uncounted ladder item — same dashed-muted voice as .badge-unknown: a zero
+/* Uncounted ladder item — same muted "?" voice as .stepper-unknown: a zero
    nobody ever counted is a question, not an "Out" claim. */
 .qty-rung-unknown {
   background: transparent;
@@ -541,3 +566,12 @@ body:has(.inv-searchbar) .toast {
 .boot-error { color: var(--danger); font-weight: 600; }
 .boot-actions { display: flex; flex-direction: column; gap: var(--s3); }
 .boot-preview { display: flex; flex-direction: column; gap: var(--s3); }
+
+/* Reduce Motion: the top-edge toast slide is exactly the class of motion the
+   setting asks to suppress (four times per stepper burst). Unmount timing is
+   timer-based in hooks.ts, so killing the animation changes nothing else;
+   opacity keeps the 150ms pre-unmount hold invisible rather than frozen ink. */
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+  .toast-leaving { animation: none; opacity: 0; }
+}

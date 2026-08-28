@@ -129,7 +129,15 @@ export interface Store {
   undoQuantity(
     itemId: string,
     qtyBefore: number,
-    restoreFlags?: { flagged: boolean; flag_source: "threshold" | "manual" | null; flagged_at: string | null },
+    restoreFlags?: {
+      flagged: boolean;
+      flag_source: "threshold" | "manual" | null;
+      flagged_at: string | null;
+      /** Pre-write observation stamp: undoing a retracted first count must
+       *  also un-count the item (null restores the "?" state), or the undo
+       *  path manufactures the exact false-Out drift it exists to prevent. */
+      verified_at?: string | null;
+    },
   ): void;
 
   // -- flags --------------------------------------------------------------
@@ -342,7 +350,12 @@ export function createStore(
       stampVerified?: boolean;
       unitBefore?: string;
       note?: string;
-      restoreFlags?: { flagged: boolean; flag_source: "threshold" | "manual" | null; flagged_at: string | null };
+      restoreFlags?: {
+        flagged: boolean;
+        flag_source: "threshold" | "manual" | null;
+        flagged_at: string | null;
+        verified_at?: string | null;
+      };
     } = {},
   ): void {
     const at = nowFn();
@@ -410,6 +423,9 @@ export function createStore(
       item.flagged = opts.restoreFlags.flagged;
       item.flag_source = opts.restoreFlags.flag_source;
       item.flagged_at = opts.restoreFlags.flagged_at;
+      // Applied after the stampVerified option so a compensating recount puts
+      // the observation stamp back exactly where it was (including null).
+      if ("verified_at" in opts.restoreFlags) item.verified_at = opts.restoreFlags.verified_at ?? null;
     }
     // recount-family only, and NOT the undo compensator: the caller decides.
     if (opts.stampVerified === true) item.verified_at = at;

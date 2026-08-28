@@ -128,8 +128,12 @@ export function InventoryView() {
       <header class="sticky-head">
         {openLive !== null && open !== null ? (
           <>
+            {/* "‹ Locations", not "‹ Pantry": directly above a location
+                titled "Pantry" (the physical closet) the tab's name would
+                mean two different places in one breath — the label names
+                the card directory this returns to. */}
             <button class="back-btn" type="button" onClick={closeLocation}>
-              ‹ Pantry
+              ‹ Locations
             </button>
             <h1 class="view-title">{capFirst(open.location ?? "elsewhere")}</h1>
             <p class="sticky-caption muted">
@@ -294,7 +298,7 @@ function LocationItems(props: {
         </li>
       )}
       {props.showUncounted &&
-        uncounted.map((item) => <ItemRow key={item.id} item={item} caption={null} holdUnknownSlot />)}
+        uncounted.map((item) => <ItemRow key={item.id} item={item} caption={null} />)}
     </ul>
   );
 }
@@ -408,11 +412,11 @@ function CartIcon(props: { filled: boolean }) {
 }
 
 /** One live item: name area opens the detail overlay; QtyControl answers and
- *  writes in place (and owns the 🔕 / Out badge / undo toast); the cart
+ *  writes in place (and owns the 🔕 / Out–? value states / undo toast); the cart
  *  target toggles the manual shopping flag AND carries the flag state (its
  *  filled/outline basket), so the row's flag-dot mark is suppressed —
  *  Shopping/Reconcile rows, which have no cart control, keep the dot. */
-function ItemRow(props: { item: Item; caption: string | null; holdUnknownSlot?: boolean }) {
+function ItemRow(props: { item: Item; caption: string | null }) {
   const store = useStore();
   const nav = useNav();
   const toast = useToast();
@@ -442,7 +446,7 @@ function ItemRow(props: { item: Item; caption: string | null; holdUnknownSlot?: 
           right-aligned unit on narrow viewports (styles.css .row-controls)
           instead of the stepper overflowing onto the name. */}
       <span class="row-controls">
-        <QtyControl item={item} brief hideFlag holdUnknownSlot={props.holdUnknownSlot} />
+        <QtyControl item={item} brief hideFlag />
         <button
           class={`inv-more${item.flagged ? " inv-more-on" : ""}`}
           type="button"

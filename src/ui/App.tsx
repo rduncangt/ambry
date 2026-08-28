@@ -5,7 +5,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { backupAgeDays, exportNag, shoppingList } from "../store/selectors";
 import type { Store } from "../store/store";
-import { EXPORT_NAG_DAYS, now } from "../types";
+import { EXPORT_NAG_DAYS, now , type AmbryDoc } from "../types";
 import { BootScreen } from "./BootScreen";
 import { Banner, Sheet } from "./components";
 import {
@@ -117,13 +117,7 @@ function Shell() {
           // sentence lives in Settings next to the same numbers; the banner
           // names whichever threshold actually fired (age or write count).
           <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
-            {doc.settings.last_export_at === null
-              ? // Never exported: "backup is N days old" would send the user
-                // hunting iCloud for a file that does not exist.
-                `No backup yet — ${Math.floor(backupAgeDays(doc, nowIso))} days of data at risk.`
-              : backupAgeDays(doc, nowIso) >= EXPORT_NAG_DAYS * 2
-                ? `Backup is ${Math.floor(backupAgeDays(doc, nowIso))} days old.`
-                : `${doc.settings.writes_since_export} changes since the last backup.`}
+            {bannerCopy(doc, nowIso)}
           </Banner>
         )}
       </div>
@@ -193,3 +187,16 @@ function Shell() {
   );
 }
 
+/** One honest line for the export banner. Never exported: say so plainly —
+ *  "backup is N days old" would send the user hunting iCloud for a file that
+ *  does not exist — with day counts clamped (clock skew can go negative) and
+ *  pluralized ("1 days" shipped once). */
+function bannerCopy(doc: AmbryDoc, nowIso: string): string {
+  const d = Math.max(0, Math.floor(backupAgeDays(doc, nowIso)));
+  if (doc.settings.last_export_at === null) {
+    if (d === 0) return "No backup yet — less than a day of data at risk.";
+    return `No backup yet — ${d} ${d === 1 ? "day" : "days"} of data at risk.`;
+  }
+  if (d >= EXPORT_NAG_DAYS * 2) return `Backup is ${d} ${d === 1 ? "day" : "days"} old.`;
+  return `${doc.settings.writes_since_export} changes since the last backup.`;
+}
