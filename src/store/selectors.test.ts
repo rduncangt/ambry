@@ -11,7 +11,9 @@ import { emptyDoc } from "./doc";
 import {
   STALE_DAYS,
   attentionItems,
+  backupAgeDays,
   exportNag,
+  groupByCategory,
   isLow,
   isUncounted,
   itemsInLocation,
@@ -199,6 +201,50 @@ describe("shoppingList — inCart (purchases since LOCAL midnight)", () => {
     });
     // Two independent evaluations (a "page kill" is just re-derivation).
     expect(shoppingList(doc, NOW)).toEqual(shoppingList(doc, NOW));
+  });
+});
+
+describe("groupByCategory", () => {
+  it("groups by category — categories alphabetical (case-insensitive), items alpha within", () => {
+    const cheddar = makeItem({ name: "cheddar", category: "Dairy" });
+    const apples = makeItem({ name: "Apples", category: "produce" });
+    const bananas = makeItem({ name: "bananas", category: "produce" });
+    const milk = makeItem({ name: "milk", category: "Dairy" });
+    expect(groupByCategory([milk, bananas, cheddar, apples])).toEqual([
+      { category: "Dairy", items: [cheddar, milk] },
+      { category: "produce", items: [apples, bananas] },
+    ]);
+  });
+
+  it("puts the null bucket last, after every named category", () => {
+    const zebraCakes = makeItem({ name: "zebra cakes", category: "Zzz snacks" });
+    const twine = makeItem({ name: "twine", category: null });
+    const apples = makeItem({ name: "apples", category: "produce" });
+    expect(groupByCategory([twine, zebraCakes, apples])).toEqual([
+      { category: "produce", items: [apples] },
+      { category: "Zzz snacks", items: [zebraCakes] },
+      { category: null, items: [twine] },
+    ]);
+  });
+
+  it('folds "Dairy"/"dairy" into ONE group under the first-seen casing', () => {
+    const milk = makeItem({ name: "milk", category: "dairy" });
+    const cheddar = makeItem({ name: "cheddar", category: "Dairy" });
+    expect(groupByCategory([milk, cheddar])).toEqual([
+      { category: "dairy", items: [cheddar, milk] },
+    ]);
+  });
+
+  it("files blank/whitespace categories into the null bucket", () => {
+    const blank = makeItem({ name: "blank", category: "" });
+    const spaces = makeItem({ name: "spaces", category: "   " });
+    expect(groupByCategory([spaces, blank])).toEqual([
+      { category: null, items: [blank, spaces] },
+    ]);
+  });
+
+  it("returns [] for empty input", () => {
+    expect(groupByCategory([])).toEqual([]);
   });
 });
 
@@ -500,5 +546,31 @@ describe("exportNag", () => {
     expect(exportNag(doc, NOW)).toBe("badge");
     const freshDoc = docWithData({ writes_since_export: 0, last_export_at: null }, iso(0));
     expect(exportNag(freshDoc, NOW)).toBe("none");
+  });
+});
+
+describe("backupAgeDays", () => {
+  const iso = (msBeforeNow: number): string => new Date(Date.parse(NOW) - msBeforeNow).toISOString();
+
+  it("measures from last_export_at when set", () => {
+    const doc = makeDoc({ items: [makeItem()] });
+    doc.settings.last_export_at = iso(15 * DAY_MS);
+    expect(backupAgeDays(doc, NOW)).toBe(15);
+  });
+
+  it("never exported: falls back to the EARLIEST record across items, extras, and events", () => {
+    const doc = makeDoc({
+      items: [makeItem({ created_at: iso(3 * DAY_MS) })],
+      extras: [makeExtra({ created_at: iso(5 * DAY_MS) })],
+      events: [makeEvent({ at: iso(9 * DAY_MS) })],
+    });
+    doc.settings.last_export_at = null;
+    expect(backupAgeDays(doc, NOW)).toBe(9);
+  });
+
+  it("empty doc has no reference and reads 0", () => {
+    const doc = makeDoc();
+    doc.settings.last_export_at = null;
+    expect(backupAgeDays(doc, NOW)).toBe(0);
   });
 });

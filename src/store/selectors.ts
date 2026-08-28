@@ -80,6 +80,42 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   return { toBuy, extras, inCart };
 }
 
+export interface CategoryGroup {
+  /** null = the uncategorized bucket (renders as "other"), always last. */
+  category: string | null;
+  items: Item[];
+}
+
+/**
+ * Store-aisle grouping for the shopping list: items bucketed by category,
+ * categories alphabetical (case-insensitive, folding "Dairy"/"dairy" into
+ * ONE group under the first-seen casing — resolveVocabValue guards entry,
+ * but imported data may still carry both), the uncategorized bucket last,
+ * items alphabetical by name within each group. Blank/whitespace categories
+ * count as uncategorized, matching valuesInUse's idea of "no value".
+ */
+export function groupByCategory(items: Item[]): CategoryGroup[] {
+  const groups = new Map<string | null, CategoryGroup>();
+  for (const item of items) {
+    const cat = item.category !== null && item.category.trim() !== "" ? item.category : null;
+    const key = cat === null ? null : cat.toLowerCase();
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = { category: cat, items: [] };
+      groups.set(key, group);
+    }
+    group.items.push(item);
+  }
+  for (const group of groups.values()) {
+    group.items.sort((a, b) => alpha(a.name, b.name));
+  }
+  return [...groups.values()].sort((a, b) => {
+    if (a.category === null) return 1;
+    if (b.category === null) return -1;
+    return alpha(a.category, b.category);
+  });
+}
+
 /**
  * Seeded-but-never-counted: a zero no human ever observed (the "?" badge
  * rule). NOT "out" — absence was never verified, so it must never read as a
@@ -252,18 +288,14 @@ export function stalest(doc: AmbryDoc, location?: string): Item[] {
 
 export type ExportNagLevel = "none" | "badge" | "banner";
 
-/** Badge at EXPORT_NAG_WRITES writes or EXPORT_NAG_DAYS days; banner at double either. Never nags an empty doc. */
-export function exportNag(doc: AmbryDoc, nowIso: string): ExportNagLevel {
-  // Nothing entered yet = nothing at risk; nagging before the first item
-  // would be entry friction for no protection gained.
-  if (doc.items.length === 0 && doc.events.length === 0 && doc.extras.length === 0) {
-    return "none";
-  }
-
-  const writes = doc.settings.writes_since_export;
-
-  // Backup age. Never exported: the backup is as old as the data itself, so
-  // the earliest record's timestamp stands in for last_export_at.
+/**
+ * Age of the backup in (fractional) days. Never exported: the backup is as
+ * old as the data itself, so the earliest record's timestamp stands in for
+ * last_export_at; an empty doc has no reference and reads 0. Exported so the
+ * banner's "Backup is N days old" line and exportNag's thresholds can never
+ * disagree about the same clock.
+ */
+export function backupAgeDays(doc: AmbryDoc, nowIso: string): number {
   let ref = doc.settings.last_export_at;
   if (ref === null) {
     for (const item of doc.items) {
@@ -276,7 +308,19 @@ export function exportNag(doc: AmbryDoc, nowIso: string): ExportNagLevel {
       if (ref === null || event.at < ref) ref = event.at;
     }
   }
-  const days = ref === null ? 0 : (Date.parse(nowIso) - Date.parse(ref)) / DAY_MS;
+  return ref === null ? 0 : (Date.parse(nowIso) - Date.parse(ref)) / DAY_MS;
+}
+
+/** Badge at EXPORT_NAG_WRITES writes or EXPORT_NAG_DAYS days; banner at double either. Never nags an empty doc. */
+export function exportNag(doc: AmbryDoc, nowIso: string): ExportNagLevel {
+  // Nothing entered yet = nothing at risk; nagging before the first item
+  // would be entry friction for no protection gained.
+  if (doc.items.length === 0 && doc.events.length === 0 && doc.extras.length === 0) {
+    return "none";
+  }
+
+  const writes = doc.settings.writes_since_export;
+  const days = backupAgeDays(doc, nowIso);
 
   if (writes >= EXPORT_NAG_WRITES * 2 || days >= EXPORT_NAG_DAYS * 2) return "banner";
   if (writes >= EXPORT_NAG_WRITES || days >= EXPORT_NAG_DAYS) return "badge";
