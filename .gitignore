@@ -12,3 +12,6 @@ ambry-backup-*.json
 # screenshots dropped into the repo for review sessions
 [Ss]creenshot*
 ambry-mobile-screenshot-*
+
+# design-review screenshot archive (untracked)
+screenshots/
