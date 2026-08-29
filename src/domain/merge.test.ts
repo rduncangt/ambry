@@ -54,6 +54,7 @@ function makeDoc(items: Item[], events: HistoryEvent[]): AmbryDoc {
       retention_days: 365,
       last_export_at: null,
       writes_since_export: 0,
+      last_trip_ended_at: null,
       device_label: "test",
     },
   };

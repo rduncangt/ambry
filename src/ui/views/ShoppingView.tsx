@@ -24,6 +24,8 @@ import "./shopping.css";
 
 export function ShoppingView() {
   const doc = useDoc();
+  const store = useStore();
+  const toast = useToast();
   const nowIso = now();
   const list = shoppingList(doc, nowIso);
 
@@ -88,6 +90,23 @@ export function ShoppingView() {
           {list.inCart.map((item) => (
             <InCartRow key={item.id} item={item} />
           ))}
+          {/* The trip's closing verb. Quantities and flags were applied at
+              each check-off — this clears the receipt, stamps the trip, and
+              hands the moment to the export banner if one is due. */}
+          <button
+            class="btn shop-finish"
+            type="button"
+            onClick={() => {
+              const n = store.finishTrip();
+              toast(
+                n === 1
+                  ? "Trip finished — 1 item into the pantry"
+                  : `Trip finished — ${n} items into the pantry`,
+              );
+            }}
+          >
+            Finish trip
+          </button>
         </div>
       )}
     </section>
@@ -245,23 +264,26 @@ function ToBuyRow(props: {
             item page and the overlay's back drops you right back here. */}
         <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
           <div class="row-title">{item.name}</div>
-          <div class="row-sub">{caption}</div>
+          <div class="row-sub">
+            {caption}
+            {age !== null && (
+              // In the caption line, a card-width away from the trash — it
+              // looked like a button in the corner and invited fat-fingered
+              // deletes. Tapping it is tapping the name: the item page.
+              <span class="shop-age" title={`On the list ${fmtAge(item.flagged_at ?? "", props.nowIso)}`}>
+                {age}
+              </span>
+            )}
+          </div>
         </button>
-        <span class="shop-corner">
-          {age !== null && (
-            <span class="shop-age" title={`On the list since ${fmtAge(item.flagged_at ?? "", props.nowIso)}`}>
-              {age}
-            </span>
-          )}
-          <button
-            class="shop-trash"
-            type="button"
-            aria-label="Remove from list"
-            onClick={removeFromList}
-          >
-            <TrashIcon />
-          </button>
-        </span>
+        <button
+          class="shop-trash"
+          type="button"
+          aria-label="Remove from list"
+          onClick={removeFromList}
+        >
+          <TrashIcon />
+        </button>
       </div>
       <div class="shop-card-acts">
         {amount}

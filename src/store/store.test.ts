@@ -1534,3 +1534,37 @@ describe("unpurchase reports what it did", () => {
     expect(item.flagged).toBe(true);
   });
 });
+
+describe("finishTrip", () => {
+  it("clears the in-cart receipt immediately and reports its size", () => {
+    const { store, clock } = fresh();
+    const a = store.createItem({ name: "Apples", quantity: 0 });
+    const b = store.createItem({ name: "Bread", quantity: 0 });
+    store.flagManual(a.id);
+    store.flagManual(b.id);
+    store.purchase(a.id, 3);
+    store.purchase(b.id, 1);
+    expect(shoppingList(store.getDoc(), clock.now()).inCart).toHaveLength(2);
+    expect(store.finishTrip()).toBe(2);
+    expect(shoppingList(store.getDoc(), clock.now()).inCart).toHaveLength(0);
+  });
+
+  it("the next check-off opens a fresh trip", () => {
+    const { store, clock } = fresh();
+    const a = store.createItem({ name: "Milk", quantity: 0 });
+    store.flagManual(a.id);
+    store.purchase(a.id, 1);
+    store.finishTrip();
+    clock.advance(60_000);
+    const b = store.createItem({ name: "Eggs", quantity: 0 });
+    store.flagManual(b.id);
+    store.purchase(b.id, 12);
+    const cart = shoppingList(store.getDoc(), clock.now()).inCart;
+    expect(cart.map((i) => i.name)).toEqual(["Eggs"]);
+  });
+
+  it("finishing an empty cart reports zero and stays harmless", () => {
+    const { store } = fresh();
+    expect(store.finishTrip()).toBe(0);
+  });
+});

@@ -13,6 +13,7 @@ function validRaw(over: Record<string, unknown> = {}): Record<string, unknown> {
       retention_days: 365,
       last_export_at: null,
       writes_since_export: 0,
+      last_trip_ended_at: null,
       device_label: "phone",
     },
     ...over,
