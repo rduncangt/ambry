@@ -4,7 +4,8 @@
  * derived from today's purchase events, so mid-trip state survives page kills
  * for free.
  */
-import type { AmbryDoc, Item, ShoppingExtra } from "../types";
+import { historyFor } from "../domain/merge";
+import type { AmbryDoc, Item, ShoppingExtra, HistoryEvent } from "../types";
 import { EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
 
 const DAY_MS = 86_400_000;
@@ -299,6 +300,62 @@ export function needsCheck(doc: AmbryDoc, nowIso: string, location?: string): It
   return stalest(doc, location).filter(
     (i) => Date.parse(i.verified_at ?? i.created_at) < freshAfter,
   );
+}
+
+export interface PurchaseRhythm {
+  /** Purchases on record for the item (merge-chain aware — a loser's
+   *  purchases count toward the survivor, via historyFor). Retention
+   *  pruning bounds the window to roughly a year by construction. */
+  count: number;
+  /** Timestamp of the most recent purchase; null when count === 0. */
+  lastAt: string | null;
+  /** Mean gap in days between successive purchases — exact, NOT rounded
+   *  (display rounds to whole days at the call site); null when count < 2. */
+  avgDays: number | null;
+}
+
+/**
+ * Buying rhythm derived from purchase events. The mean of successive gaps
+ * telescopes to (newest − oldest) / (count − 1), so only the two endpoint
+ * timestamps matter once the purchases are isolated. `nowIso` rides along
+ * like every other clocked read-model (the call site renders lastAt with
+ * fmtAge against the same instant, so the pair travels together).
+ */
+export function purchaseRhythm(doc: AmbryDoc, itemId: string, nowIso: string): PurchaseRhythm {
+  void nowIso; // the rhythm itself is age-independent; see the doc comment
+  // historyFor returns newest-first. Reversed check-offs must not count as
+  // buying: both put-back paths leave the purchase event in the append-only
+  // log and add a compensating recount noted "put back" — walk newest-first
+  // with a counter, each reversal cancelling the next-older purchase (the
+  // store guarantees one reversal per same-day purchase, so the pairing is
+  // exact). A mistap + undo otherwise reads "Bought once · just now" and
+  // repeated mistaps drag the average toward zero.
+  const purchases: HistoryEvent[] = [];
+  let pendingReversals = 0;
+  // historyFor's stable sort keeps DOCUMENT order for same-timestamp ties,
+  // which puts a purchase before the reversal that undid it when both landed
+  // in the same millisecond; break ties by document position (later append =
+  // newer) so cancellation pairs correctly.
+  const docIndex = new Map(doc.events.map((e, i) => [e.id, i]));
+  const newestFirst = [...historyFor(doc, itemId)].sort((a, b) =>
+    a.at === b.at ? (docIndex.get(b.id) ?? 0) - (docIndex.get(a.id) ?? 0) : a.at < b.at ? 1 : -1,
+  );
+  for (const e of newestFirst) {
+    if (e.kind === "recount" && e.note === "put back") pendingReversals++;
+    else if (e.kind === "purchase") {
+      if (pendingReversals > 0) pendingReversals--;
+      else purchases.push(e);
+    }
+  }
+  const count = purchases.length;
+  const newest = purchases[0];
+  const oldest = purchases[count - 1];
+  if (newest === undefined || oldest === undefined) {
+    return { count: 0, lastAt: null, avgDays: null };
+  }
+  const avgDays =
+    count < 2 ? null : (Date.parse(newest.at) - Date.parse(oldest.at)) / (count - 1) / DAY_MS;
+  return { count, lastAt: newest.at, avgDays };
 }
 
 export type ExportNagLevel = "none" | "badge" | "banner";

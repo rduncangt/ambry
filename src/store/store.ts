@@ -147,7 +147,7 @@ export interface Store {
       flag_source: "threshold" | "manual" | null;
       flagged_at: string | null;
       /** Pre-write observation stamp: undoing a retracted first count must
-       *  also un-count the item (null restores the "?" state), or the undo
+       *  also un-count the item (null restores the "–" uncounted state), or the undo
        *  path manufactures the exact false-Out drift it exists to prevent. */
       verified_at?: string | null;
     },

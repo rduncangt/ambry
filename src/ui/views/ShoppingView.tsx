@@ -18,7 +18,7 @@ import { useState } from "preact/hooks";
 import { fmtAge, fmtLevel, fmtQty, parseDec } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
-import { InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
+import { CartDoneIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./shopping.css";
 
@@ -38,7 +38,13 @@ export function ShoppingView() {
 
   return (
     <section class="view">
-      <h1 class="view-title">Shopping</h1>
+      {/* Sticky like Pantry's header: the notice pill docks top-right, and
+          without an opaque band it would sit on the first card's trash
+          button — its Undo hit box overlapping a control is exactly what
+          the tap-through contract promises never happens. */}
+      <header class="sticky-head">
+        <h1 class="view-title">Shopping</h1>
+      </header>
 
       {list.toBuy.length === 0 ? (
         <p class="shop-empty">
@@ -111,7 +117,9 @@ function InCartRow(props: { item: Item }) {
 
   // Same two-deck card as To Buy, one deck deep: identity left (name, level
   // line, the quiet escape hatch), the done-mark on the check-off's right
-  // column — the dimmed card reads as "this row, completed".
+  // column — the dimmed card reads as "this row, completed". The mark is
+  // the FILLED state of the check-off's cart glyph, so a row keeps one
+  // continuous landmark as it moves between sections.
   return (
     <div class="shop-card shop-cart-row">
       <div class="shop-card-top">
@@ -123,7 +131,7 @@ function InCartRow(props: { item: Item }) {
           </button>
         </div>
         <span class="shop-cart-mark" aria-hidden="true">
-          ✓
+          <CartDoneIcon />
         </span>
       </div>
     </div>
@@ -149,11 +157,15 @@ function ToBuyRow(props: {
 
   const [entering, setEntering] = useState(false); // decimal entry open
 
-  // Flag provenance: auto flags say how long the need has stood.
-  const provenance =
-    item.flag_source === "threshold"
-      ? `auto · ${fmtAge(item.flagged_at, props.nowIso)}`
-      : "manual";
+  // Caption = level + how long the need has stood on the list. Flag
+  // provenance (auto vs manual) lives on the item page, where "why is this
+  // flagged?" is actually asked — three crammed fields was one too many
+  // mid-aisle. A manual flag has a flagged_at too, so both paths carry the
+  // list age; without one (defensive: old data), just the level.
+  const caption =
+    item.flagged_at === null
+      ? fmtLevel(item)
+      : `${fmtLevel(item)} · added ${fmtAge(item.flagged_at, props.nowIso)}`;
 
   const buy = (): void => {
     // Capture the flag triple BEFORE the write: purchase always clears the
@@ -195,8 +207,8 @@ function ToBuyRow(props: {
   // not 1, must not need a trip back to the pantry view — or even an extra
   // tap to reveal the control. Steps by 1, floor 0 (0 = check-off clears the
   // flag without adding stock — already legal); tapping the value opens
-  // decimal entry. Quieter than the ✓ on purpose: correcting the amount is
-  // secondary to the purchase gesture itself.
+  // decimal entry. Quieter than the cart button on purpose: correcting the
+  // amount is secondary to the purchase gesture itself.
   const amount = entering ? (
     <InlineQtyInput
       initial={fmtQty(pending)}
@@ -229,9 +241,7 @@ function ToBuyRow(props: {
       <div class="shop-card-top">
         <div class="shop-card-main">
           <div class="row-title">{item.name}</div>
-          <div class="row-sub">
-            {fmtLevel(item)} · {provenance}
-          </div>
+          <div class="row-sub">{caption}</div>
         </div>
         <button
           class="shop-trash"
@@ -244,8 +254,13 @@ function ToBuyRow(props: {
       </div>
       <div class="shop-card-acts">
         {amount}
-        <button class="shop-check" type="button" aria-label={`Bought ${item.name}`} onClick={buy}>
-          ✓
+        <button
+          class="shop-check"
+          type="button"
+          aria-label={`Add ${item.name} to cart`}
+          onClick={buy}
+        >
+          <CartPlusIcon />
         </button>
       </div>
     </div>
@@ -291,7 +306,8 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
       <h2 class="shop-section-title">Extras</h2>
       {props.extras.map((extra) => (
         // Same card rhythm as To Buy, one deck: an extra has no amount or
-        // caption, so the ✓ sits directly on the name line's right column.
+        // caption, so the cart button sits directly on the name line's
+        // right column.
         <div key={extra.id} class="shop-card">
           <div class="shop-card-top shop-card-center">
             <div class="shop-card-main">
@@ -303,7 +319,7 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
               aria-label={`Got ${extra.text}`}
               onClick={() => check(extra)}
             >
-              ✓
+              <CartPlusIcon />
             </button>
           </div>
         </div>

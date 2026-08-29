@@ -59,14 +59,14 @@ export function qtyLines(qty: number, unit: string): { num: string; unit: string
 }
 
 export function Stepper(props: {
-  /** Line 1, preformatted — the number, or a state word ("Out", "?"). */
+  /** Line 1, preformatted — the number, or a state word ("Out", "–"). */
   value: string;
   /** Line 2 — small muted unit line ("bags", "bags · 400 g"); omit/null for
    *  none. The component stays dumb about units: callers split via qtyLines. */
   unit?: string | null;
-  /** Extra class on line 1 (the Out/? value-state tones). */
+  /** Extra class on line 1 (the Out/– value-state tones). */
   valueClass?: string;
-  /** Title on the value block (the "?" state's explanation). */
+  /** Title on the value block (the uncounted "–" state's explanation). */
   valueTitle?: string;
   onDelta: (d: number) => void;
   /** When given, the value itself is a button (opens absolute entry). */
@@ -112,7 +112,7 @@ const RUNGS: LadderRung[] = ["full", "half", "low", "out"];
 
 export function LadderChips(props: { item: Item; onRung: (rung: LadderRung) => void }) {
   // An uncounted item has no current rung: quantity 0 would light "Out",
-  // asserting a verified absence the collapsed "?" chip just declined to make.
+  // asserting a verified absence the collapsed "–" chip just declined to make.
   const active = isUncounted(props.item) ? null : readRung(props.item.quantity);
   const tap = (rung: LadderRung): void => {
     // Multi-container guard (PLAN.md §1.7): rung values are fractions of ONE
@@ -240,7 +240,7 @@ export function QtyControl(props: {
     flag_source: item.flag_source,
     flagged_at: item.flagged_at,
     // A retracted count must also retract its observation stamp, or an
-    // undone first tap leaves a "?" item wearing a false verified "Out".
+    // undone first tap leaves a "–" item wearing a false verified "Out".
     verified_at: item.verified_at,
   });
 
@@ -274,7 +274,7 @@ export function QtyControl(props: {
     const restore = flagsBefore();
     // First observation: a +/− on a never-counted zero IS a count, not a
     // consumption delta — route it through the recount path so verified_at
-    // is stamped ("?" and staleness stop aging an item a human just
+    // is stamped ("–" and staleness stop aging an item a human just
     // counted). Subsequent taps are ordinary deltas again.
     if (isUncounted(item)) {
       store.setQuantity(item.id, item.quantity + d);
@@ -331,8 +331,8 @@ export function QtyControl(props: {
           🔕
         </span>
       )}
-      {/* No Out/? pills here: state lives in the value itself — the number
-          rows' stepper value line says Out/?, matching the ladder chip's
+      {/* No Out/– pills here: state lives in the value itself — the number
+          rows' stepper value line says Out/–, matching the ladder chip's
           vocabulary (its rung chip already says the same words). */}
     </span>
   );
@@ -374,9 +374,11 @@ export function QtyControl(props: {
             onClick={() => setLadderOpen(true)}
           >
             {/* A zero nobody ever counted must not claim "Out": the chip
-                carries the same "?" the number rows wear (the dashed style
-                and title above already say the rest). */}
-            {unknown ? "?" : ladderLabel(item.quantity, readRung(item.quantity))}
+                carries the same quiet "–" the number rows wear (the dashed
+                style and title above already say the rest — a dash states
+                "no value yet" without a hundred seeded rows reading as a
+                hundred nagging questions). */}
+            {unknown ? "–" : ladderLabel(item.quantity, readRung(item.quantity))}
           </button>
         )}
       </span>
@@ -388,13 +390,13 @@ export function QtyControl(props: {
   // derived side in beside it ("bags · 400 g").
   // Zero states live IN the value, sharing the ladder chip's vocabulary: a
   // verified zero says "Out" (quiet danger text, no pill); a zero no human
-  // ever observed is not "Out" — it's "?" (seeded items wear this until the
+  // ever observed is not "Out" — it's "–" (seeded items wear this until the
   // first shelf-walk count). The unit line stays; tap still opens entry.
   const unknown = isUncounted(item);
   const lines = qtyLines(item.quantity, item.unit);
   let unitLine = lines.unit;
   // Fold the derived side in ("bags · 400 g") only when there is a real
-  // number to derive from: under a "?" the small line asserting a measured
+  // number to derive from: under a "–" the small line asserting a measured
   // "0 g" would contradict the value's refusal to claim anything, and under
   // a verified Out "· 0 g" is pure redundancy.
   if (props.brief !== true && !unknown && item.quantity > 0) {
@@ -409,7 +411,7 @@ export function QtyControl(props: {
     <span class="qty">
       {marks}
       <Stepper
-        value={unknown ? "?" : out ? "Out" : lines.num}
+        value={unknown ? "–" : out ? "Out" : lines.num}
         unit={unitLine}
         valueClass={unknown ? "stepper-unknown" : out ? "stepper-out" : undefined}
         valueTitle={unknown ? "Never counted — set during a shelf walk" : undefined}
@@ -446,6 +448,68 @@ export function TrashIcon() {
       <path d="M18.5 6l-.9 13.1a1.5 1.5 0 0 1-1.5 1.4H7.9a1.5 1.5 0 0 1-1.5-1.4L5.5 6" />
       <path d="M10 10.5v6" />
       <path d="M14 10.5v6" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cart icons — the check-off's add-to-cart glyph and the in-cart done-mark
+// ---------------------------------------------------------------------------
+
+/** Stroke-style cart-with-a-plus glyph (currentColor, ~22px — the same
+ *  drawing family as TrashIcon above and InventoryView's CartIcon). The
+ *  shopping check-off wears it: the gesture reads "into the cart", not a
+ *  generic confirm ✓. Callers own the hit box and the aria-label. */
+export function CartPlusIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="22"
+      height="22"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      {/* CartIcon's cart, nudged down-left to make room for the + where the
+          goods drop in (above the basket's open top). */}
+      <path d="M2.5 6.5h2L6.2 16h9.6l1.9-6.2H4.9" />
+      <circle cx="7.6" cy="20.4" r="1.4" />
+      <circle cx="14.6" cy="20.4" r="1.4" />
+      <path d="M18.6 2.6v5.2" />
+      <path d="M16 5.2h5.2" />
+    </svg>
+  );
+}
+
+/** The filled state of the same cart drawing — the in-cart row's done-mark.
+ *  Solid where CartPlusIcon is open, so a row keeps one continuous landmark
+ *  (the cart) as it moves from To Buy to the dimmed cart section. Purely
+ *  decorative: aria-hidden, the row's own text carries the state. */
+export function CartDoneIcon() {
+  // The FILLED state of CartPlusIcon's own drawing, same 22px geometry, the
+  // plus replaced by a small check — the row's landmark stays continuous
+  // when it moves from To Buy into the cart. Deliberately NOT the pantry
+  // CartIcon's body: that filled basket means "on the shopping list" one
+  // tab over, and one glyph must not carry opposite meanings.
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="22"
+      height="22"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 6.5h2L6.2 16h9.6l1.9-6.2H4.9" fill="currentColor" />
+      <circle cx="7.6" cy="20.4" r="1.4" fill="currentColor" />
+      <circle cx="14.6" cy="20.4" r="1.4" fill="currentColor" />
+      <path d="M15.9 4.8l2 2 3-3.4" />
     </svg>
   );
 }

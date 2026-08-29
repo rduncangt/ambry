@@ -12,7 +12,7 @@ import { rungValue } from "../../domain/ladder";
 import { historyFor, planMerge } from "../../domain/merge";
 import { duplicateCandidates, searchItems } from "../../domain/search";
 import { planPackageResize, planUnitChange, toPreciseUnit } from "../../domain/units";
-import { resolveVocabValue, valuesInUse } from "../../store/selectors";
+import { purchaseRhythm, resolveVocabValue, valuesInUse } from "../../store/selectors";
 import type { CreateItemInput } from "../../store/store";
 import {
   COMMON_UNITS,
@@ -857,6 +857,23 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
       : `flagged by hand ${fmtAge(item.flagged_at, nowIso)}`;
   const activeThresholdRung = item.threshold === null ? null : thresholdRung(item.threshold);
 
+  // Buying rhythm (purchase events via the merge-chain-aware selector):
+  // quiet context for the threshold and "usually buy" settings below it.
+  // Rounding to whole days happens HERE, not in the selector, and floors at
+  // 1 — "about every 0 days" would be same-day noise. Never bought = no
+  // line at all (retention bounds the window to ~a year; recent enough to
+  // stand without a caveat).
+  const rhythm = purchaseRhythm(doc, item.id, nowIso);
+  let rhythmLine: string | null = null;
+  if (rhythm.count === 1) {
+    rhythmLine = `Bought once · ${fmtAge(rhythm.lastAt, nowIso)}`;
+  } else if (rhythm.count >= 2 && rhythm.avgDays !== null) {
+    const days = Math.max(1, Math.round(rhythm.avgDays));
+    rhythmLine = `Bought ${rhythm.count} times · about every ${days} ${
+      days === 1 ? "day" : "days"
+    } · last ${fmtAge(rhythm.lastAt, nowIso)}`;
+  }
+
   return (
     <section class="view">
       {/* Name — tap to edit inline. The shell header shows it too and updates live. */}
@@ -969,6 +986,8 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
       {/* Resupply */}
       <section class="item-section">
         <h2 class="item-section-title">Resupply</h2>
+
+        {rhythmLine !== null && <p class="muted item-hint">{rhythmLine}</p>}
 
         {item.flagged ? (
           <div class="item-inline">
