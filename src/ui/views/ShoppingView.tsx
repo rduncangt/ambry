@@ -7,8 +7,11 @@
  *             purchase gesture (§1.2), with the amount correctable first.
  *   EXTRAS  — live ad-hoc lines; check-off soft-deletes and offers one-shot
  *             graduation to a real pantry item.
- *   IN CART — today's purchases, dimmed, read-only (derived from events, so
- *             mid-trip state survives page kills for free).
+ *   IN THE CART — today's purchases, dimmed (derived from events, so
+ *             mid-trip state survives page kills for free), each with a
+ *             "Put back" escape hatch for mistaps noticed after the undo
+ *             toast is gone: store.unpurchase reverses the purchase and
+ *             re-raises the flag, moving the row back to To Buy.
  * All writes go through Store commands (AGENTS.md rule 1).
  */
 import { useState } from "preact/hooks";
@@ -59,21 +62,49 @@ export function ShoppingView() {
 
       {list.inCart.length > 0 && (
         <div class="shop-section">
-          <h2 class="shop-section-title">In cart ({list.inCart.length})</h2>
+          <h2 class="shop-section-title">In the cart</h2>
+          <p class="shop-section-sub">checked off this trip</p>
           {list.inCart.map((item) => (
-            <div key={item.id} class="row shop-cart-row">
-              <div class="row-main">
-                <div class="row-title">{item.name}</div>
-                <div class="row-sub">{fmtLevel(item)}</div>
-              </div>
-              <span class="shop-cart-mark" aria-hidden="true">
-                ✓
-              </span>
-            </div>
+            <InCartRow key={item.id} item={item} />
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// IN THE CART row — dimmed confirmation with the put-back escape hatch
+// ---------------------------------------------------------------------------
+
+function InCartRow(props: { item: Item }) {
+  const store = useStore();
+  const toast = useToast();
+  const item = props.item;
+
+  const putBack = (): void => {
+    // Mistap noticed after the 3 s undo toast: unpurchase reverses the
+    // purchase (quantity back to its qty_before) and re-raises the flag, so
+    // the row returns to To Buy — the inCart selector excludes flagged items.
+    store.unpurchase(item.id);
+    toast(`${item.name} put back — ${fmtLevel(item)}`);
+  };
+
+  return (
+    <div class="row shop-cart-row">
+      <div class="row-main">
+        <div class="row-title">{item.name}</div>
+        <div class="row-sub">{fmtLevel(item)}</div>
+        <div class="shop-actions">
+          <button class="shop-quiet" type="button" onClick={putBack}>
+            Put back
+          </button>
+        </div>
+      </div>
+      <span class="shop-cart-mark" aria-hidden="true">
+        ✓
+      </span>
+    </div>
   );
 }
 
@@ -116,15 +147,22 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
     const last = store.lastQuantityWrite();
     const message = `Bought ${item.name} — ${fmtLevel(item)}`;
     if (last === null) toast(message);
-    else toast(message, () => store.undoQuantity(last.itemId, last.qtyBefore, flagsBefore));
+    else
+      toast(message, () =>
+        // note "put back": marks the reversal so the inCart selector knows
+        // this check-off was retracted (same marker the Put back action uses).
+        store.undoQuantity(last.itemId, last.qtyBefore, flagsBefore, { note: "put back" }),
+      );
   };
 
-  const havePlenty = (): void => {
+  const removeFromList = (): void => {
     // PLAN.md §1.2 fix 4: the flag path that never ends in a purchase.
+    // Action language, not state language — the button removes the item
+    // from the list; whether there is "plenty" is not its claim to make.
     store.clearFlag(item.id);
     // Undo re-raises manually — provenance becomes "manual"/now, which is
     // honest: the re-raise IS a fresh human decision.
-    toast(`${item.name}: flag cleared`, () => store.flagManual(item.id));
+    toast(`${item.name}: removed from list`, () => store.flagManual(item.id));
   };
 
   const actions = editing ? (
@@ -163,8 +201,8 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
       >
         +{fmtQtyUnit(pending, item.unit)}
       </button>
-      <button class="shop-quiet" type="button" onClick={havePlenty}>
-        have plenty
+      <button class="shop-quiet" type="button" onClick={removeFromList}>
+        Remove from list
       </button>
     </>
   );

@@ -7,10 +7,11 @@ import {
   type Item,
   type ShoppingExtra,
 } from "../types";
+import { memoryAdapter } from "./adapter";
 import { emptyDoc } from "./doc";
+import { createStore } from "./store";
 import {
   STALE_DAYS,
-  attentionItems,
   backupAgeDays,
   exportNag,
   groupByCategory,
@@ -193,6 +194,23 @@ describe("shoppingList — inCart (purchases since LOCAL midnight)", () => {
     expect(shoppingList(doc, NOW).inCart).toEqual([]);
   });
 
+  it("excludes a currently-flagged item — a put-back row lives in To Buy only", () => {
+    // unpurchase re-raises the flag; the row must move back to To Buy whole,
+    // never sit in both sections at once.
+    const putBack = makeItem({ flagged: true, flagged_at: NOW });
+    const kept = makeItem();
+    const doc = makeDoc({
+      items: [putBack, kept],
+      events: [
+        makeEvent({ item_id: putBack.id, at: new Date(midnight + 1000).toISOString() }),
+        makeEvent({ item_id: kept.id, at: new Date(midnight + 2000).toISOString() }),
+      ],
+    });
+    const list = shoppingList(doc, NOW);
+    expect(list.inCart).toEqual([kept]);
+    expect(list.toBuy).toEqual([putBack]);
+  });
+
   it("mid-trip state is purely derived: same doc, same list (no stored in_cart)", () => {
     const item = makeItem();
     const doc = makeDoc({
@@ -275,42 +293,6 @@ describe("isLow", () => {
   for (const c of cases) {
     it(c.name, () => {
       expect(isLow(makeItem(c.over))).toBe(c.want);
-    });
-  }
-});
-
-describe("attentionItems", () => {
-  it("flagged first (oldest flagged_at first), then unflagged low by name", () => {
-    const lowB = makeItem({ name: "butter", quantity: 1, threshold: 1, verified_at: NOW });
-    const lowA = makeItem({ name: "Anchovies", quantity: 0.5, threshold: 1, verified_at: NOW });
-    const flaggedNew = makeItem({ flagged: true, flagged_at: "2026-08-20T00:00:00.000Z" });
-    const flaggedOld = makeItem({ flagged: true, flagged_at: "2026-08-10T00:00:00.000Z" });
-    const fine = makeItem({ quantity: 5, threshold: 1 });
-    const doc = makeDoc({ items: [lowB, flaggedNew, fine, lowA, flaggedOld] });
-    // Case-insensitive alpha inside the low tail.
-    expect(attentionItems(doc)).toEqual([flaggedOld, flaggedNew, lowA, lowB]);
-  });
-
-  it("an item both flagged and low appears once, in the flagged section", () => {
-    const both = makeItem({ flagged: true, flagged_at: NOW, quantity: 0.5, threshold: 1, verified_at: NOW });
-    expect(attentionItems(makeDoc({ items: [both] }))).toEqual([both]);
-  });
-
-  it("includes a flagged item even while uncounted — a flag is a human act", () => {
-    // Flagging is one deliberate tap on the ⋯ toggle; hiding it here while
-    // the Shopping badge counts it would make the two disagree.
-    const flaggedUncounted = makeItem({ flagged: true, flagged_at: NOW, quantity: 0, verified_at: null });
-    expect(attentionItems(makeDoc({ items: [flaggedUncounted] }))).toEqual([flaggedUncounted]);
-  });
-
-  const excluded: { name: string; over: Partial<Item> }[] = [
-    { name: "uncounted item, even with a threshold above zero", over: { quantity: 0, verified_at: null, threshold: 1 } },
-    { name: "soft-deleted flagged item", over: { flagged: true, flagged_at: NOW, deleted_at: NOW } },
-    { name: "healthy item (no flag, above threshold)", over: { quantity: 5, threshold: 1 } },
-  ];
-  for (const c of excluded) {
-    it(`never contains a ${c.name}`, () => {
-      expect(attentionItems(makeDoc({ items: [makeItem(c.over)] }))).toEqual([]);
     });
   }
 });
@@ -572,5 +554,43 @@ describe("backupAgeDays", () => {
     const doc = makeDoc();
     doc.settings.last_export_at = null;
     expect(backupAgeDays(doc, NOW)).toBe(0);
+  });
+});
+
+describe("inCart is reversal-aware", () => {
+  it("a Put back followed by a later flag-clear does not resurface the item in the cart", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter);
+    const item = store.createItem({ name: "Salsa", quantity: 1 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1);
+    store.unpurchase(item.id); // reversal recount, flag re-raised
+    store.clearFlag(item.id); // user decides they don't need it after all
+    const list = shoppingList(store.getDoc(), new Date().toISOString());
+    expect(list.inCart.map((i) => i.name)).toEqual([]); // nothing came home
+    expect(list.toBuy.map((i) => i.name)).toEqual([]);
+  });
+
+  it("an undone purchase (note 'put back') stays out of the cart after flag-clear", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter);
+    const item = store.createItem({ name: "Jelly", quantity: 1 });
+    store.flagManual(item.id);
+    const before = { flagged: item.flagged, flag_source: item.flag_source, flagged_at: item.flagged_at };
+    store.purchase(item.id, 1);
+    store.undoQuantity(item.id, 1, before, { note: "put back" });
+    store.clearFlag(item.id);
+    const list = shoppingList(store.getDoc(), new Date().toISOString());
+    expect(list.inCart).toEqual([]);
+  });
+
+  it("an unreversed purchase still shows in the cart once its flag is gone", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter);
+    const item = store.createItem({ name: "Bread", quantity: 0 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 2); // bought: flag clears, quantity 2
+    const list = shoppingList(store.getDoc(), new Date().toISOString());
+    expect(list.inCart.map((i) => i.name)).toEqual(["Bread"]);
   });
 });

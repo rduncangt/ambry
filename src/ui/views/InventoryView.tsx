@@ -6,12 +6,14 @@
  * every launch is friction).
  *
  * Three states, all under one sticky screen header and the same search bar:
- *   1. Default — "Low & flagged" attention rows, then one tappable card per
- *      location. A seeded catalog is mostly uncounted "?" rows; a flat list
- *      buries the handful of real counts, so the directory replaces it.
- *   2. Location open — that shelf's counted rows (no category caption:
- *      inside one shelf it is noise), with the uncounted pile collapsed
- *      behind a "not counted yet" divider.
+ *   1. Default — one tappable card per location. A seeded catalog is mostly
+ *      uncounted "?" rows; a flat list buries the handful of real counts, so
+ *      the directory replaces it. (An earlier "Low & flagged" strip above
+ *      the cards is gone: low items flag themselves now and the Shopping tab
+ *      lists them — here it was noise.)
+ *   2. Location open — that shelf's counted rows, flagged-first (no category
+ *      caption: inside one shelf it is noise), with the uncounted pile
+ *      collapsed behind a "not counted yet" divider.
  *   3. Searching — flat ranked results across ALL items regardless of open
  *      location; clearing the query drops back to whichever state was
  *      underneath. Creation IS search (PLAN.md §1.4): when the query matches
@@ -29,7 +31,6 @@ import { duplicateCandidates, searchItems } from "../../domain/search";
 import {
   STALE_DAYS,
   alpha,
-  attentionItems,
   itemsInLocation,
   locationSummaries,
   staleCount,
@@ -54,24 +55,64 @@ function capFirst(s: string): string {
 }
 
 /**
- * Re-partition a location's live rows by the uncounted-pile snapshot taken
- * when the shelf was opened: an item counted DURING the visit keeps its slot
- * in the tail (showing its fresh value) instead of jumping into the counted
- * section mid-burst — a re-shuffle under the finger would land the next tap
- * on a different item's control. Alphabetical within each section, i.e. the
- * exact order the visit opened with, stable for its whole duration.
+ * The order a location visit opens with: counted rows flagged-first (the
+ * owner's "move the items in the shopping cart to the top"), alphabetical
+ * within each group. Computed ONCE per visit, from flag state at open —
+ * see visitSnapshot / splitByVisit.
+ */
+function countedOrderAtOpen(counted: Item[]): string[] {
+  const flagged = counted.filter((i) => i.flagged).sort((a, b) => alpha(a.name, b.name));
+  const rest = counted.filter((i) => !i.flagged).sort((a, b) => alpha(a.name, b.name));
+  return [...flagged, ...rest].map((i) => i.id);
+}
+
+/** Both per-visit snapshots, taken together the moment the shelf opens. */
+function visitSnapshot(live: { counted: Item[]; uncounted: Item[] }): {
+  countedOrder: string[];
+  uncountedIds: Set<string>;
+} {
+  return {
+    countedOrder: countedOrderAtOpen(live.counted),
+    uncountedIds: new Set(live.uncounted.map((i) => i.id)),
+  };
+}
+
+/**
+ * Re-partition a location's live rows by the snapshots taken when the shelf
+ * was opened. VISIT-SNAPSHOT INVARIANT: the row order is computed ONCE at
+ * open and never resorts while the shelf stays open —
+ * - an item counted DURING the visit keeps its slot in the uncounted tail
+ *   (showing its fresh value) instead of jumping into the counted section
+ *   mid-burst;
+ * - the counted section renders in `countedOrder`, the flagged-first
+ *   (alpha within each group) order as flag state stood AT OPEN — taken the
+ *   same moment as the uncounted Set — so cart-toggling or purchasing
+ *   mid-visit cannot shuffle rows under the finger;
+ * - newly created/moved-in items APPEND after the snapshot rows (alpha among
+ *   themselves); deleted/moved-away rows simply drop out.
+ * A re-shuffle under the finger would land the next tap on a different
+ * item's control; the fresh order arrives on the next visit.
  */
 function splitByVisit(
   live: { counted: Item[]; uncounted: Item[] },
-  uncountedIds: Set<string>,
+  snapshot: { countedOrder: string[]; uncountedIds: Set<string> },
 ): { counted: Item[]; uncounted: Item[] } {
-  // Items created/moved here mid-visit are not in the snapshot, so they file
-  // under counted; deleted/moved-away rows simply drop out of both halves.
   const all = [...live.counted, ...live.uncounted];
   const byName = (a: Item, b: Item): number => alpha(a.name, b.name);
+  const slot = new Map(snapshot.countedOrder.map((id, i) => [id, i]));
+  const counted = all
+    .filter((i) => !snapshot.uncountedIds.has(i.id))
+    .sort((a, b) => {
+      const sa = slot.get(a.id);
+      const sb = slot.get(b.id);
+      if (sa !== undefined && sb !== undefined) return sa - sb;
+      if (sa !== undefined) return -1; // snapshot rows keep their slots
+      if (sb !== undefined) return 1; // new rows append after them
+      return byName(a, b);
+    });
   return {
-    counted: all.filter((i) => !uncountedIds.has(i.id)).sort(byName),
-    uncounted: all.filter((i) => uncountedIds.has(i.id)).sort(byName),
+    counted,
+    uncounted: all.filter((i) => snapshot.uncountedIds.has(i.id)).sort(byName),
   };
 }
 
@@ -81,11 +122,13 @@ export function InventoryView() {
   const [query, setQuery] = useState("");
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
-   *  `string | null` could not also mean "nothing open". `uncountedIds` is
-   *  the uncounted pile as it stood at open — the visit-long partition
-   *  snapshot splitByVisit() renders by. */
+   *  `string | null` could not also mean "nothing open". `uncountedIds` and
+   *  `countedOrder` are the visit-long snapshots (uncounted pile + the
+   *  flagged-first counted order, both as they stood at open) that
+   *  splitByVisit() renders by. */
   const [open, setOpen] = useState<{
     location: string | null;
+    countedOrder: string[];
     uncountedIds: Set<string>;
   } | null>(null);
   /** Uncounted pile revealed? Lives up here (not in LocationItems) so a
@@ -99,7 +142,7 @@ export function InventoryView() {
 
   const openLocation = (location: string | null): void => {
     const split = itemsInLocation(doc, location);
-    setOpen({ location, uncountedIds: new Set(split.uncounted.map((i) => i.id)) });
+    setOpen({ location, ...visitSnapshot(split) });
     // Collapsed on every fresh open — the divider is the reveal gesture —
     // UNLESS there is nothing counted to protect: an all-uncounted shelf
     // (the dominant state of a freshly seeded pantry) behind a collapsed
@@ -117,7 +160,7 @@ export function InventoryView() {
   // render from the visit-frozen partition, which deliberately does not.
   const openLive = open !== null && !searching ? itemsInLocation(doc, open.location) : null;
   const openSplit =
-    open !== null && openLive !== null ? splitByVisit(openLive, open.uncountedIds) : null;
+    open !== null && openLive !== null ? splitByVisit(openLive, open) : null;
   const stale = staleCount(doc, nowIso);
 
   return (
@@ -187,36 +230,15 @@ export function InventoryView() {
   );
 }
 
-/** Default state: the attention section, then one card per location. */
+/** Default state: one card per location. (The old "Low & flagged" strip is
+ *  gone — low items flag themselves and the Shopping tab lists them; the
+ *  location cards keep their low/uncounted markers.) */
 function PantryHome(props: { onOpen: (location: string | null) => void }) {
   const doc = useDoc();
-  // Membership is snapshotted on mount (same invariant as splitByVisit): a +
-  // tap that lifts a low item above threshold keeps its row in place showing
-  // the new value instead of vanishing mid-burst and shifting the next row
-  // under the finger. Newly low/flagged items still append live; deleted ones
-  // drop; the list re-derives on the next visit to this screen.
-  const [attentionIds] = useState(() => new Set(attentionItems(doc).map((i) => i.id)));
-  const live = attentionItems(doc);
-  for (const item of live) attentionIds.add(item.id);
-  const byId = new Map(doc.items.map((i) => [i.id, i]));
-  const attention = [...attentionIds]
-    .map((id) => byId.get(id))
-    .filter((i): i is Item => i !== undefined && i.deleted_at === null);
   const summaries = locationSummaries(doc);
 
   return (
     <div>
-      {attention.length > 0 && (
-        <section>
-          <h2 class="inv-sec">Low &amp; flagged</h2>
-          <ul class="inv-list">
-            {attention.map((item) => (
-              <ItemRow key={item.id} item={item} caption={caption(item.category, item.location)} />
-            ))}
-          </ul>
-        </section>
-      )}
-
       {summaries.length === 0 ? (
         <p class="muted">Nothing here yet — type a name below to add your first item.</p>
       ) : (
