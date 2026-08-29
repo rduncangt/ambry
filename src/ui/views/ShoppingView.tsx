@@ -15,7 +15,7 @@
  * All writes go through Store commands (AGENTS.md rule 1).
  */
 import { useState } from "preact/hooks";
-import { fmtAge, fmtLevel, fmtQty, parseDec } from "../../domain/format";
+import { fmtAge, fmtLevel, fmtQty, parseDec, fmtAgeShort } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
 import { CartMinusIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
@@ -101,6 +101,7 @@ export function ShoppingView() {
 function InCartRow(props: { item: Item }) {
   const store = useStore();
   const toast = useToast();
+  const nav = useNav();
   const item = props.item;
 
   const putBack = (): void => {
@@ -122,10 +123,10 @@ function InCartRow(props: { item: Item }) {
   return (
     <div class="shop-card shop-cart-row">
       <div class="shop-card-top">
-        <div class="shop-card-main">
+        <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
           <div class="row-title">{item.name}</div>
           <div class="row-sub">{fmtLevel(item)}</div>
-        </div>
+        </button>
         <button
           class="shop-check shop-check-remove"
           type="button"
@@ -153,20 +154,20 @@ function ToBuyRow(props: {
 }) {
   const store = useStore();
   const toast = useToast();
+  const nav = useNav();
   const item = props.item;
   const pending = props.pending;
 
   const [entering, setEntering] = useState(false); // decimal entry open
 
-  // Caption = level + how long the need has stood on the list. Flag
-  // provenance (auto vs manual) lives on the item page, where "why is this
-  // flagged?" is actually asked — three crammed fields was one too many
-  // mid-aisle. A manual flag has a flagged_at too, so both paths carry the
-  // list age; without one (defensive: old data), just the level.
-  const caption =
-    item.flagged_at === null
-      ? fmtLevel(item)
-      : `${fmtLevel(item)} · added ${fmtAge(item.flagged_at, props.nowIso)}`;
+  // Caption = just the level. Flag provenance lives on the item page, and
+  // list-age moved to the corner chip below — the caption sentence was the
+  // last crammed field standing.
+  const caption = fmtLevel(item);
+  // List-age lives in a compact corner chip ("3d"), not a caption sentence —
+  // scannable down the whole list at a glance; the full wording rides the
+  // title attribute for anyone who presses in.
+  const age = item.flagged_at === null ? null : fmtAgeShort(item.flagged_at, props.nowIso);
 
   const buy = (): void => {
     // Capture the flag triple BEFORE the write: purchase always clears the
@@ -240,18 +241,27 @@ function ToBuyRow(props: {
   return (
     <div class="shop-card">
       <div class="shop-card-top">
-        <div class="shop-card-main">
+        {/* The name is a door: units wrong, threshold off — fix it on the
+            item page and the overlay's back drops you right back here. */}
+        <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
           <div class="row-title">{item.name}</div>
           <div class="row-sub">{caption}</div>
-        </div>
-        <button
-          class="shop-trash"
-          type="button"
-          aria-label="Remove from list"
-          onClick={removeFromList}
-        >
-          <TrashIcon />
         </button>
+        <span class="shop-corner">
+          {age !== null && (
+            <span class="shop-age" title={`On the list since ${fmtAge(item.flagged_at ?? "", props.nowIso)}`}>
+              {age}
+            </span>
+          )}
+          <button
+            class="shop-trash"
+            type="button"
+            aria-label="Remove from list"
+            onClick={removeFromList}
+          >
+            <TrashIcon />
+          </button>
+        </span>
       </div>
       <div class="shop-card-acts">
         {amount}

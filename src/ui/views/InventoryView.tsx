@@ -446,26 +446,31 @@ function SearchResults(props: {
           <RestoreRow key={item.id} item={item} nowIso={props.nowIso} />
         ),
       )}
-      {!exactVisible && (
-        <li class="row">
-          <button
-            class="row-main inv-open"
-            type="button"
-            onClick={() =>
-              // Standing in an open shelf, the new item files there (PLAN.md
-              // M1 quick-create: location preselected); otherwise as before.
-              nav.openCreate(
-                trimmed,
-                props.openLocation !== null
-                  ? { location: props.openLocation.location }
-                  : undefined,
-              )
-            }
-          >
-            <span class="row-title inv-create">Create “{trimmed}”</span>
-          </button>
-        </li>
-      )}
+      {/* PLAN.md §1.4: "create new anyway remains a one-tap secondary
+          action". Suppressing this row entirely when an exact match shows
+          dead-ended the legitimate near-name ("black bean" while typing
+          toward "Black beans, dry"): the user saw only the existing item
+          and no way to add. Demote, never remove. */}
+      <li class="row">
+        <button
+          class="row-main inv-open"
+          type="button"
+          onClick={() =>
+            // Standing in an open shelf, the new item files there (PLAN.md
+            // M1 quick-create: location preselected); otherwise as before.
+            nav.openCreate(
+              trimmed,
+              props.openLocation !== null
+                ? { location: props.openLocation.location }
+                : undefined,
+            )
+          }
+        >
+          <span class={`row-title inv-create${exactVisible ? " inv-create-anyway" : ""}`}>
+            {exactVisible ? `Create “${trimmed}” anyway` : `Create “${trimmed}”`}
+          </span>
+        </button>
+      </li>
     </ul>
   );
 }
