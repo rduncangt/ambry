@@ -1,14 +1,24 @@
+import { now } from "../types";
 /**
  * Restore-first boot screen (PLAN.md §2 boot rule): from inside the sandbox,
  * eviction is indistinguishable from first run, so the app never silently
- * starts fresh. Restore is the primary action; "Start new pantry" hides
- * behind an explicit confirm.
+ * starts fresh. Restore is the primary action; starting over hides behind an
+ * explicit confirm.
+ *
+ * The EMPTY boot (only) also offers the bundled starter pantry: a genuinely
+ * new user should not face a blank app or assume an empty kitchen. The seed
+ * ships inside the bundle (JSON import — precached with the app shell) and
+ * runs through parseImport -> importReplace, the SAME gated pipeline as any
+ * restore, so migrations apply and the bundled file keeps importing
+ * correctly forever (R3). Corrupt boots keep their recovery focus: no
+ * starter door there.
  */
-import { useState } from "preact/hooks";
-import { parseImport } from "../domain/exportImport";
+import { useMemo, useState } from "preact/hooks";
+import { parseImport, restampDoc } from "../domain/exportImport";
 import type { AmbryDoc } from "../types";
 import { useStore } from "./hooks";
 import { pickFile, readText } from "./share";
+import seedData from "../../seed/starter-pantry.json";
 
 interface RestorePreview {
   doc: AmbryDoc;
@@ -20,6 +30,16 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
   const store = useStore();
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<RestorePreview | null>(null);
+
+  // The starter seed, parsed once through the real import gate. stringify →
+  // parseImport is deliberate: the pipeline gets its own deep copy (the
+  // bundled module object must never be aliased into the live doc) and the
+  // item count shown below comes from the parse result, never hardcoded.
+  const seed = useMemo(
+    () => (props.status === "empty" ? parseImport(JSON.stringify(seedData)) : null),
+    [props.status],
+  );
+  const starter = seed !== null && seed.ok ? seed : null;
 
   async function chooseBackup(): Promise<void> {
     setError(null);
@@ -70,6 +90,28 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
     if (ok) props.onDone();
   }
 
+  function startStarter(): void {
+    if (starter === null) return;
+    // One tap + one confirm. Same warning shape as startNew: this too is a
+    // choice to proceed without a backup, and the count comes from the
+    // parse result — what will actually land.
+    const ok = window.confirm(
+      `Start with the starter pantry? ${starter.envelope.counts.items} common items, all uncounted — count what you have as you go. If you have a backup file, restore it instead.`,
+    );
+    if (!ok) return;
+    // The bundled seed's timestamps are frozen at build time; stamp the copy
+    // "now" so a fresh start begins with zero data-age (no instant staleness,
+    // no day-one "N days at risk" banner). The parse result is already a
+    // deep copy, so mutating it is safe.
+    restampDoc(starter.doc, now());
+    const outcome = store.importReplace(starter.doc);
+    if (!outcome.ok) {
+      setError("The starter pantry could not be saved on this device.");
+      return;
+    }
+    props.onDone();
+  }
+
   const exportedAtText =
     preview !== null && preview.exportedAt !== null
       ? new Date(preview.exportedAt).toLocaleString()
@@ -99,8 +141,20 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
           <button class="btn btn-primary btn-big" type="button" onClick={() => void chooseBackup()}>
             Restore backup
           </button>
+          {/* Empty boot only: the starter door. A corrupt boot keeps its
+              recovery focus — offering 128 fresh items beside a damaged
+              pantry would read as a way out of restoring. */}
+          {props.status === "empty" && starter !== null && (
+            <button class="btn btn-secondary btn-big" type="button" onClick={startStarter}>
+              Start with the starter pantry
+              <span class="btn-sub">
+                {starter.envelope.counts.items} common items, all uncounted — count what you
+                have as you go
+              </span>
+            </button>
+          )}
           <button class="btn" type="button" onClick={startNew}>
-            Start new pantry
+            {props.status === "empty" ? "Start empty" : "Start new pantry"}
           </button>
         </div>
       ) : (

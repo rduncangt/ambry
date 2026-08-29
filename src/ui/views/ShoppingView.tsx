@@ -15,10 +15,10 @@
  * All writes go through Store commands (AGENTS.md rule 1).
  */
 import { useState } from "preact/hooks";
-import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, parseDec } from "../../domain/format";
+import { fmtAge, fmtLevel, fmtQty, parseDec } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
-import { InlineQtyInput, qtyLines, Stepper } from "../components";
+import { InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./shopping.css";
 
@@ -26,6 +26,15 @@ export function ShoppingView() {
   const doc = useDoc();
   const nowIso = now();
   const list = shoppingList(doc, nowIso);
+
+  // Pending buy amounts, keyed by item id at VIEW level: a row keeps its
+  // corrected amount ("3 tubs, not 1") even when regrouping or a check-off
+  // + undo remounts it mid-trip. Session-local by design — nothing is
+  // written until the check-off itself (purchase uses this amount then).
+  const [amounts, setAmounts] = useState<Record<string, number>>({});
+  const setAmount = (id: string, n: number): void => {
+    setAmounts((a) => ({ ...a, [id]: n }));
+  };
 
   return (
     <section class="view">
@@ -51,7 +60,13 @@ export function ShoppingView() {
                 <h3 class="shop-cat-title">{group.category ?? "other"}</h3>
               )}
               {group.items.map((item) => (
-                <ToBuyRow key={item.id} item={item} nowIso={nowIso} />
+                <ToBuyRow
+                  key={item.id}
+                  item={item}
+                  nowIso={nowIso}
+                  pending={amounts[item.id] ?? item.restock_amount}
+                  onPending={(n) => setAmount(item.id, n)}
+                />
               ))}
             </div>
           ))}
@@ -84,10 +99,14 @@ function InCartRow(props: { item: Item }) {
 
   const putBack = (): void => {
     // Mistap noticed after the 3 s undo toast: unpurchase reverses the
-    // purchase (quantity back to its qty_before) and re-raises the flag, so
-    // the row returns to To Buy — the inCart selector excludes flagged items.
-    store.unpurchase(item.id);
-    toast(`${item.name} put back — ${fmtLevel(item)}`);
+    // purchase and re-raises the flag, so the row returns to To Buy.
+    // It refuses across midnight (a stale tab can display yesterday's
+    // purchases) — the toast must not claim a reversal that didn't happen.
+    if (store.unpurchase(item.id)) {
+      toast(`${item.name} put back — ${fmtLevel(item)}`);
+    } else {
+      toast(`${item.name} was bought yesterday — nothing to put back`);
+    }
   };
 
   return (
@@ -112,15 +131,19 @@ function InCartRow(props: { item: Item }) {
 // TO BUY row — the one-big-tap purchase gesture
 // ---------------------------------------------------------------------------
 
-function ToBuyRow(props: { item: Item; nowIso: string }) {
+function ToBuyRow(props: {
+  item: Item;
+  nowIso: string;
+  /** Pending purchase amount (view-level state), corrected BEFORE the buy
+   *  tap — the amount purchase() will apply on check-off. */
+  pending: number;
+  onPending: (n: number) => void;
+}) {
   const store = useStore();
   const toast = useToast();
   const item = props.item;
+  const pending = props.pending;
 
-  // Pending purchase amount, corrected BEFORE the buy tap (bought 2, not 1).
-  // Local state only: nothing is written until the check-off itself.
-  const [pending, setPending] = useState(item.restock_amount);
-  const [editing, setEditing] = useState(false); // mini stepper open
   const [entering, setEntering] = useState(false); // decimal entry open
 
   // Flag provenance: auto flags say how long the need has stood.
@@ -165,44 +188,42 @@ function ToBuyRow(props: { item: Item; nowIso: string }) {
     toast(`${item.name}: removed from list`, () => store.flagManual(item.id));
   };
 
-  const actions = editing ? (
-    entering ? (
-      <InlineQtyInput
-        initial={fmtQty(pending)}
-        onDone={(raw) => {
-          setEntering(false);
-          if (raw === null) return;
-          // parseDec rejects blank/garbage/negative — any of those leaves
-          // the pending amount unchanged (the store rounds on the write).
-          const n = parseDec(raw);
-          if (n !== null) setPending(n);
-        }}
-      />
-    ) : (
-      <>
-        <Stepper
-          value={qtyLines(pending, item.unit).num}
-          unit={qtyLines(pending, item.unit).unit}
-          onDelta={(d) => setPending((p) => Math.max(0, p + d))}
-          onTapValue={() => setEntering(true)}
-        />
-        <button class="shop-quiet" type="button" onClick={() => setEditing(false)}>
-          done
-        </button>
-      </>
-    )
+  // ALWAYS-VISIBLE compact stepper: realizing mid-aisle that it's 3 tubs,
+  // not 1, must not need a trip back to the pantry view — or even an extra
+  // tap to reveal the control. Steps by 1, floor 0 (0 = check-off clears the
+  // flag without adding stock — already legal); tapping the value opens
+  // decimal entry. Quieter than the ✓ on purpose: correcting the amount is
+  // secondary to the purchase gesture itself.
+  const actions = entering ? (
+    <InlineQtyInput
+      initial={fmtQty(pending)}
+      onDone={(raw) => {
+        setEntering(false);
+        if (raw === null) return;
+        // parseDec rejects blank/garbage/negative — any of those leaves
+        // the pending amount unchanged (the store rounds on the write).
+        const n = parseDec(raw);
+        if (n !== null) props.onPending(n);
+      }}
+    />
   ) : (
     <>
+      <span class="shop-stepper">
+        <Stepper
+          value={`+${qtyLines(pending, item.unit).num}`}
+          unit={qtyLines(pending, item.unit).unit}
+          valueTitle="Amount to buy — tap to type an exact amount"
+          onDelta={(d) => props.onPending(Math.max(0, pending + d))}
+          onTapValue={() => setEntering(true)}
+        />
+      </span>
       <button
-        class="shop-amt"
+        class="shop-trash"
         type="button"
-        aria-label={`Amount to buy: ${fmtQtyUnit(pending, item.unit)} — tap to change`}
-        onClick={() => setEditing(true)}
+        aria-label="Remove from list"
+        onClick={removeFromList}
       >
-        +{fmtQtyUnit(pending, item.unit)}
-      </button>
-      <button class="shop-quiet" type="button" onClick={removeFromList}>
-        Remove from list
+        <TrashIcon />
       </button>
     </>
   );
