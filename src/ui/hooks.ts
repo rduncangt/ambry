@@ -51,6 +51,11 @@ export type View = "pantry" | "shopping" | "more" | "reconcile";
 export interface CreateDefaults {
   /** Preselected location; null/omitted = none (the "elsewhere" bucket). */
   location?: string | null;
+  /** Invoked exactly once after a successful create — never on cancel/close.
+   *  The opener's chance to retire whatever offered creation: the pantry
+   *  search passes a query-clear here so a stale “Create ‘beer’ anyway” row
+   *  cannot linger and invite a duplicate of the item just made. */
+  onCreated?: () => void;
 }
 
 export interface Nav {

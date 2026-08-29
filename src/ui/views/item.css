@@ -50,6 +50,25 @@
 }
 .item-field { display: flex; flex-direction: column; gap: var(--s2); }
 .item-label { font-size: 14px; font-weight: 600; }
+
+/* Collapsed vocab picker (Location/Category): ONE chip carries the current
+   value; tapping it expands the full chip row in place. The voice is the
+   collapsed ladder's (styles.css .qty-rung): outline + accent = a control
+   holding a value, dashed muted = the "none" placeholder — filled
+   .chip-active stays the expanded row's selected-chip voice. .chip already
+   floors the target at 44px (--tap); the expanded row wraps as before. */
+.picker-current {
+  align-self: flex-start; /* content width, not the column's full stretch */
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.picker-current-none {
+  border-style: dashed;
+  border-color: var(--muted);
+  color: var(--muted);
+  font-weight: 400;
+}
 .item-hint { font-size: 13px; }
 
 /* Numeric entry: narrow, right-aligned, tabular — reads like a quantity. */

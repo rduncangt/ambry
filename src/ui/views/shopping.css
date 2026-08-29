@@ -194,12 +194,6 @@
 }
 .shop-open:active .row-title { color: var(--accent); }
 
-/* Corner stack: age chip beside the trash, both quiet. */
-.shop-corner {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-}
 /* The age chip: one glyph-width of list-age ("3d") — scannable down the
    whole list; the sentence version rides its title attribute. */
 .shop-age {
