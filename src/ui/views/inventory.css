@@ -183,3 +183,11 @@
 @media (prefers-reduced-motion: reduce) {
   .inv-chevron { transition: none; }
 }
+
+/* The demoted create row: an exact match sits above it, so it whispers —
+   still one tap, never a dead end. */
+.inv-create-anyway {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 15px;
+}

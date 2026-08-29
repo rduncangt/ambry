@@ -76,6 +76,17 @@ export function fmtQtyUnit(qty: number, unit: string): string {
   return `${q} ${u}${es ? "es" : "s"}`;
 }
 
+/**
+ * Compact age for chips: "now", "5m", "3h", "12d" — fmtAge's buckets with
+ * the words stripped, for surfaces where a sentence is too loud.
+ */
+export function fmtAgeShort(iso: string | null, nowIso: string): string {
+  const long = fmtAge(iso, nowIso);
+  if (long === "never") return "–";
+  if (long === "just now") return "now";
+  return long.replace(" ago", "");
+}
+
 /** "Full", "Half", "Low", "Out"; qty > 1 -> "Full +N" (N = qty-1, fmtQty'd). */
 export function ladderLabel(qty: number, rung: LadderRung): string {
   // Above one container the surplus must stay visible (§1.7) — "Full +2"
