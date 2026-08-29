@@ -182,7 +182,10 @@ describe("fmtLevel", () => {
     expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 1 }))).toBe("Full");
     expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0.5 }))).toBe("Half");
     expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0.2 }))).toBe("Low");
-    expect(fmtLevel(makeItem({ display_mode: "ladder", quantity: 0 }))).toBe("Out");
+    // A zero only reads "Out" once a human verified it; unverified is "?".
+    expect(
+      fmtLevel(makeItem({ display_mode: "ladder", quantity: 0, verified_at: "2026-01-02T00:00:00.000Z" })),
+    ).toBe("Out");
   });
 
   it("keeps the multi-container surplus visible on ladder items", () => {
@@ -255,5 +258,25 @@ describe("fmtAge", () => {
 
   it("treats an unparseable timestamp as just now rather than NaN", () => {
     expect(fmtAge("not-a-date", now)).toBe("just now");
+  });
+});
+
+describe("fmtLevel refuses to call an unverified zero a shortage", () => {
+  const base = {
+    id: "x", name: "X", aliases: [], notes: "", category: null, location: null,
+    package_size: null, threshold: null, flagged: false, flag_source: null,
+    flagged_at: null, restock_amount: 1, never_prompt: false, expiry: null,
+    barcodes: [], merged_into: null, created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z", deleted_at: null,
+  };
+  it("uncounted number item reads ?", () => {
+    expect(fmtLevel({ ...base, unit: "bag", quantity: 0, display_mode: "number", verified_at: null } as Item)).toBe("?");
+  });
+  it("uncounted ladder item reads ?", () => {
+    expect(fmtLevel({ ...base, unit: "jar", quantity: 0, display_mode: "ladder", verified_at: null } as Item)).toBe("?");
+  });
+  it("verified zero still reads Out / 0", () => {
+    expect(fmtLevel({ ...base, unit: "jar", quantity: 0, display_mode: "ladder", verified_at: "2026-01-02T00:00:00.000Z" } as Item)).toBe("Out");
+    expect(fmtLevel({ ...base, unit: "bag", quantity: 0, display_mode: "number", verified_at: "2026-01-02T00:00:00.000Z" } as Item)).toBe("0 bags");
   });
 });

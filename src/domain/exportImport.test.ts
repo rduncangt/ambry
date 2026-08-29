@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, type AmbryDoc, type HistoryEvent, type Item, type ShoppingExtra } from "../types";
 import { MIGRATIONS } from "../store/migrations";
-import { buildExport, checkStaleness, exportFilename, parseImport } from "./exportImport";
+import { buildExport, checkStaleness, exportFilename, parseImport, restampDoc } from "./exportImport";
+import { emptyDoc } from "../store/doc";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -323,5 +324,27 @@ describe("checkStaleness", () => {
       events: [makeEvent({ at: T3 })],
     });
     expect(checkStaleness(mixed, makeDoc()).localLatest).toBe(T1);
+  });
+});
+
+describe("restampDoc", () => {
+  it("stamps item/extra timestamps to now, leaving identity and counts alone", () => {
+    const doc = emptyDoc("seed");
+    doc.items.push({
+      id: "00000000-0000-4000-8000-000000000001", name: "Apples", aliases: [], notes: "",
+      category: "fruit", location: "countertop", unit: "count", quantity: 0,
+      package_size: null, display_mode: "number", threshold: null, flagged: false,
+      flag_source: null, flagged_at: null, restock_amount: 1, never_prompt: false,
+      expiry: null, barcodes: [], verified_at: null, merged_into: null,
+      created_at: "2026-08-28T02:07:05.459Z", updated_at: "2026-08-28T02:07:05.459Z", deleted_at: null,
+    });
+    const at = "2026-11-01T12:00:00.000Z";
+    restampDoc(doc, at);
+    const it2 = doc.items[0]!;
+    expect(it2.created_at).toBe(at);
+    expect(it2.updated_at).toBe(at);
+    expect(it2.verified_at).toBeNull(); // still uncounted — restamp is not a count
+    expect(it2.id).toBe("00000000-0000-4000-8000-000000000001");
+    expect(it2.quantity).toBe(0);
   });
 });

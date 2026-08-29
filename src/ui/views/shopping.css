@@ -57,14 +57,41 @@
   gap: var(--s2);
   margin: calc(-1 * var(--s1)) 0 calc(-1 * var(--s1)) calc(-1 * var(--s2));
 }
-.shop-amt {
+/* Visible buy-amount stepper: [−] +N unit [+], one voice quieter than the ✓
+   — the check-off stays THE gesture; this only corrects what it will write.
+   Buttons keep the shared stepper's full 44px targets but drop the card
+   fill; the value wears the old "+1 tub" accent voice. */
+.shop-stepper .stepper-btn {
+  background: none;
+  color: var(--muted);
+  font-size: 18px;
+}
+.shop-stepper .stepper-value {
+  min-width: 44px;
+  max-width: 96px;
+}
+.shop-stepper .stepper-num {
+  font-size: 14px;
+  color: var(--accent);
+}
+.shop-stepper .stepper-unit {
+  color: var(--muted);
+}
+
+/* Trash-can icon button: on a list row it unambiguously means "off this
+   list" — same quiet weight the old text link carried, 44px hit box around
+   the ~20px glyph. */
+.shop-trash {
   background: none;
   border: none;
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--muted);
+  width: var(--tap);
   min-height: var(--tap);
-  padding: 0 var(--s2);
+  padding: 0;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .shop-quiet {
   background: none;

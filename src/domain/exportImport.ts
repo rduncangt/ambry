@@ -152,3 +152,23 @@ export function checkStaleness(local: AmbryDoc, incoming: AmbryDoc): StalenessCh
     localLatest !== null && (incomingLatest === null || incomingLatest < localLatest);
   return { incomingIsOlder, localLatest, incomingLatest };
 }
+
+/**
+ * Re-stamp a doc's item/extra timestamps to `nowIso`, IN PLACE. Built for the
+ * bundled starter pantry: its JSON carries frozen build-time dates, so
+ * without this a user starting fresh N days after the seed was generated
+ * boots a minutes-old pantry that instantly claims "N days of data at risk",
+ * fills "Needs a check", and reads fully stale. Events are deliberately NOT
+ * touched — restamping history would falsify a real backup, and the seed
+ * ships none. verified_at stays as-is (null in the seed: uncounted is true).
+ */
+export function restampDoc(doc: AmbryDoc, nowIso: string): void {
+  for (const item of doc.items) {
+    item.created_at = nowIso;
+    item.updated_at = nowIso;
+  }
+  for (const extra of doc.extras) {
+    extra.created_at = nowIso;
+    extra.updated_at = nowIso;
+  }
+}

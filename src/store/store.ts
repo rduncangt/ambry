@@ -127,7 +127,10 @@ export interface Store {
    * flagged_at now) so the item goes back to To Buy. Silently no-ops when
    * the item has no purchase today.
    */
-  unpurchase(id: string): void;
+  /** Returns true when a same-day purchase was reversed; false when there
+   *  was nothing to put back (e.g. the purchase happened before local
+   *  midnight while the tab sat open) — callers must not claim success. */
+  unpurchase(id: string): boolean;
   /**
    * Undo the last quantity write: compensating `recount` back to qtyBefore
    * (no verified_at stamp). Callers capture the item's flag triple BEFORE
@@ -597,7 +600,7 @@ export function createStore(
         if (Date.parse(e.at) >= midnight) target = e;
         break; // an older most-recent purchase means nothing bought today
       }
-      if (target === undefined) return; // no same-day purchase: nothing to put back
+      if (target === undefined) return false; // no same-day purchase: nothing to put back
       // Through the normal commit path. restoreFlags is the same in-commit
       // flag override the undo path uses: the re-raise must land atomically
       // with the quantity reversal, and "manual"/now is honest provenance —
@@ -612,6 +615,7 @@ export function createStore(
         note: "put back",
         restoreFlags: { flagged: true, flag_source: "manual", flagged_at: nowFn() },
       });
+      return true;
     },
 
     undoQuantity(itemId, qtyBefore, restoreFlags, opts) {

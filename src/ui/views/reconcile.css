@@ -24,6 +24,19 @@
   font-size: 20px;
   flex-shrink: 0;
 }
+/* Calm empty state where the micro-audit row would be: everything was
+   confirmed within FRESH_DAYS, so there is nothing to walk — same quiet
+   voice as a pick row's sub-line, no border, nothing tappable. */
+.recon-fresh {
+  color: var(--muted);
+  font-size: 14px;
+  padding: var(--s2) 0;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+}
 
 /* -- walk header: location title + switch-back-to-picker ------------------- */
 .recon-head {
