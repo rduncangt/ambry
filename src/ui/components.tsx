@@ -199,9 +199,9 @@ export function QtyControl(props: {
    *  (non-brief) folds the derived side into the unit line ("bags · 400 g")
    *  — toasts, via fmtLevel, keep the full flat fmtQtyBoth string. */
   brief?: boolean;
-  /** Suppress the flag-dot mark: for rows whose own cart toggle already
+  /** Suppress the cart mark: for rows whose own cart toggle already
    *  shows the flag state (InventoryView) — two marks for one fact is
-   *  noise. Rows without that control (Shopping/Reconcile) keep the dot. */
+   *  noise. Rows without that control (Reconcile, the item page) keep it. */
   hideFlag?: boolean;
 }) {
   const store = useStore();
@@ -217,13 +217,29 @@ export function QtyControl(props: {
   // an abandoned expansion must not leave four chips crowding the row.
   useEffect(() => {
     if (!ladderOpen) return;
-    const close = (e: PointerEvent): void => {
+    const isInside = (t: EventTarget | null): boolean => {
       const root = ladderRef.current;
-      if (root !== null && e.target instanceof Node && root.contains(e.target)) return;
-      setLadderOpen(false);
+      return root !== null && t instanceof Node && root.contains(t);
     };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    // Two-phase outside-close (same rule as PickerRow): dead-area taps
+    // dismiss on pointerdown; taps on interactive controls collapse only
+    // after their click completes, so the re-layout can't shift the target
+    // out from under the finger mid-gesture.
+    const onPointerDown = (e: PointerEvent): void => {
+      if (isInside(e.target)) return;
+      const interactive =
+        e.target instanceof Element && e.target.closest("button,input,textarea,select,label,a") !== null;
+      if (!interactive) setLadderOpen(false);
+    };
+    const onClickCapture = (e: MouseEvent): void => {
+      if (!isInside(e.target)) setLadderOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", onClickCapture, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("click", onClickCapture, true);
+    };
   }, [ladderOpen]);
 
   /** Snapshot the flag triple BEFORE a write: quantity writes can raise or
@@ -323,9 +339,7 @@ export function QtyControl(props: {
 
   const marks = (
     <span class="qty-marks">
-      {item.flagged && props.hideFlag !== true && (
-        <span class="flag-dot" title="Flagged for shopping" />
-      )}
+      {item.flagged && props.hideFlag !== true && <CartMarkIcon />}
       {item.never_prompt && (
         <span class="nobell" title="Auto-flag off">
           🔕
@@ -511,6 +525,36 @@ export function CartMinusIcon() {
       <circle cx="14.6" cy="20.4" r="1.4" />
       <path d="M16 5.2h5.2" />
     </svg>
+  );
+}
+
+/** Mini FILLED cart — the flagged-for-shopping mark beside steppers (the
+ *  item page's quantity block, reconcile rows). InventoryView's cart toggle
+ *  already says "on the list" with a filled basket; the brown dot that stood
+ *  here was a second dialect for the same word. Same drawing as that
+ *  toggle's filled state (CartIcon geometry), at mark scale (~14px) in the
+ *  accent color (.cart-mark). Purely decorative: aria-hidden, with the
+ *  dot's old title on the wrapper — unlike the toggle, this one is not
+ *  tappable and asserts nothing the row's controls don't already know. */
+export function CartMarkIcon() {
+  return (
+    <span class="cart-mark" title="Flagged for shopping">
+      <svg
+        viewBox="0 0 24 24"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M3 4h2.2L7 14.5h10.4L19.6 7H5.8" fill="currentColor" />
+        <circle cx="8.5" cy="19.5" r="1.4" fill="currentColor" />
+        <circle cx="16.5" cy="19.5" r="1.4" fill="currentColor" />
+      </svg>
+    </span>
   );
 }
 
