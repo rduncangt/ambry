@@ -231,19 +231,19 @@ body::after {
    made a SHORT name claim 40% of the row and shoved a cluster that fit in
    the leftover onto its own line. The numbers (16px SF Pro; row = viewport
    − 2×16 content padding; the stacked stepper value is a FIXED 52–76px
-   column, so unit length no longer moves the cluster; cluster = stepper
-   44+4+(52–76)+4+44 = 148–172, +17 for the flag dot on flagged rows,
-   +8 gap +40 cart slot (44 − 4 overlap margin)):
+   column, so unit length no longer moves the cluster; cluster = capsule
+   stepper 1+44+(52–76)+44+1 = 142–166, +17 for the flag dot on flagged
+   rows, +8 gap +40 cart slot (44 − 4 overlap margin)):
 
    390pt phone, row 358px —
-   · attention row (caption + flag dot), widest value column: cluster 237
-     → 88+8+237 = 333 ≤ 358, one line — every unit, every value
-   · location row (no caption, no dot): cluster 220
-     → 88+8+220 = 316 ≤ 358, one line
+   · attention row (caption + flag dot), widest value column: cluster 231
+     → 88+8+231 = 327 ≤ 358, one line — every unit, every value
+   · location row (no caption, no dot): cluster 214
+     → 88+8+214 = 310 ≤ 358, one line
    320pt phone, row 288px —
-   · attention row, even the narrowest cluster 213
-     → 88+8+213 = 309 > 288, wraps — genuine: the bare 88px floor
-     leaves only 192px for a 213px cluster. */
+   · attention row, even the narrowest cluster 207
+     → 88+8+207 = 303 > 288, wraps — genuine: the bare 88px floor
+     leaves only 192px for a 207px cluster. */
 .row-main { flex: 1 1 88px; min-width: 88px; }
 /* The qty cluster + overflow toggle as one flex unit: never splits
    mid-cluster, and margin-left:auto keeps it right-aligned on its own
@@ -457,22 +457,64 @@ body::after {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.stepper { display: inline-flex; align-items: center; gap: var(--s1); }
-.stepper-btn {
-  width: var(--tap);
+/* ONE fused capsule: a single hairline pill wraps minus / value / plus.
+   Three floating boxes read as three separate controls; one outline reads
+   as one control with two ends. The capsule owns the border; the buttons
+   are borderless and transparent inside — and there are NO internal
+   separators: the value's weight and its muted unit line already part the
+   column from the +/− glyphs, so hairlines there would just be fuss.
+   Height pins to the 44px tap token with the border inside (border-box),
+   keeping every row's rhythm; each button's ::before then rebuilds the
+   full 44px press band over the 1px the border ate (the .qty-rung trick). */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
   height: var(--tap);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 999px;
   background: var(--card);
+}
+.stepper-btn {
+  position: relative;
+  width: var(--tap);
+  border: none;
+  background: none;
   font-size: 22px;
   line-height: 1;
 }
-.stepper-btn:active { filter: brightness(0.95); }
+/* End caps follow the capsule's curve so the pressed tint can never poke a
+   square corner out of the pill. */
+.stepper-btn:first-child { border-radius: 999px 0 0 999px; }
+.stepper-btn:last-child { border-radius: 0 999px 999px 0; }
+/* Transparent buttons have nothing for the old brightness filter to darken;
+   press feedback is the soft accent wash instead. */
+.stepper-btn:active { background: var(--accent-soft); }
+/* The tappable value is a control too: same 44px press band over the capsule
+   border, same pressed wash — otherwise it feels unregistered between its
+   two flashing neighbors (tap-highlight is globally transparent). */
+button.stepper-value::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  bottom: -1px;
+}
+button.stepper-value:active { background: var(--accent-soft); }
+.stepper-btn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  bottom: -1px;
+}
 /* Stacked value — number over a small muted unit line, ONE tap target. A
    flat "0 cartons" between the buttons blew the row width on long units and
    forced ugly double-height wraps; stacking pins the column to a fixed
    narrow band, so cluster width no longer depends on the unit's length. */
 .stepper-value {
+  position: relative; /* anchors the press-band overlay below */
   min-width: 52px;
   max-width: 76px;
   display: inline-flex;
@@ -484,7 +526,8 @@ body::after {
   font-variant-numeric: tabular-nums;
   background: none;
   border: none;
-  min-height: var(--tap);
+  /* No min-height: the capsule's stretch already gives the value the full
+     inner height (a 44px floor of its own would overflow the border-box). */
   padding: 0 var(--s1);
   line-height: 1.2;
 }

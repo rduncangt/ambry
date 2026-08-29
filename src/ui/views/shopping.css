@@ -1,5 +1,10 @@
-/* Shopping view (ShoppingView.tsx). Reuses the .row/.row-* primitives from
-   styles.css; these rules add only the check-off targets and section chrome. */
+/* Shopping view (ShoppingView.tsx). Rows here are two-deck CARDS, not .row
+   dividers: deck 1 is identity (name + caption, the quiet remove), deck 2
+   is action (buy-amount capsule left, THE check-off right). The card is the
+   same surface voice as InventoryView's location cards — var(--card) ground,
+   hairline border, --radius — and card + whitespace IS the row separation
+   (no border-bottom dividers). Text inside reuses .row-title/.row-sub so
+   type stays identical to the pantry rows. */
 
 /* -- sections -------------------------------------------------------------- */
 .shop-section { margin-top: var(--s4); }
@@ -33,6 +38,37 @@
 }
 .shop-cat:first-of-type .shop-cat-title { margin-top: var(--s1); }
 
+/* -- two-deck row cards ---------------------------------------------------- */
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  margin-top: var(--s2);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+/* Deck 1 — identity: name (wraps; .row-title clamps at 2 lines) over the
+   caption on the left, the quiet trash pinned top-right. flex-start keeps
+   the trash glyph on the name's first line even when the name wraps. */
+.shop-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+}
+/* Extras variant: a single-line card centers its lone ✓ against the name. */
+.shop-card-center { align-items: center; }
+.shop-card-main { flex: 1; min-width: 0; }
+/* Deck 2 — action row: amount capsule (or its inline decimal entry) left,
+   the big check-off right. */
+.shop-card-acts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
 /* -- the ONE BIG check-off target ------------------------------------------
    Oversized on purpose: flow (b) is 20 check-offs mid-aisle, one-handed. */
 .shop-check {
@@ -48,27 +84,17 @@
 }
 .shop-check:active { background: var(--accent-soft); }
 
-/* -- secondary action line under the row text ------------------------------
-   Small text but full 44px tap height; negative top margin keeps the row
-   from ballooning past one comfortable thumb-stop. */
-.shop-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  margin: calc(-1 * var(--s1)) 0 calc(-1 * var(--s1)) calc(-1 * var(--s2));
-}
-/* Visible buy-amount stepper: [−] +N unit [+], one voice quieter than the ✓
-   — the check-off stays THE gesture; this only corrects what it will write.
-   Buttons keep the shared stepper's full 44px targets but drop the card
-   fill; the value wears the old "+1 tub" accent voice. */
+/* Visible buy-amount stepper: the shared capsule one voice quieter than the
+   ✓ — the check-off stays THE gesture; this only corrects what it will
+   write. Muted small +/− glyphs; the value keeps the "+1 tub" accent voice.
+   (The capsule border and transparent buttons come from the base .stepper.) */
 .shop-stepper .stepper-btn {
-  background: none;
   color: var(--muted);
   font-size: 18px;
 }
 .shop-stepper .stepper-value {
   min-width: 44px;
-  max-width: 96px;
+  max-width: 120px;
 }
 .shop-stepper .stepper-num {
   font-size: 14px;
@@ -79,8 +105,10 @@
 }
 
 /* Trash-can icon button: on a list row it unambiguously means "off this
-   list" — same quiet weight the old text link carried, 44px hit box around
-   the ~20px glyph. */
+   list" — quiet weight, 44px hit box around the ~20px glyph. The negative
+   margins tuck the box into the card's corner padding (nothing tappable
+   lives there) so the glyph sits near the corner without shrinking the
+   target — the sheet-close/back-btn trick. */
 .shop-trash {
   background: none;
   border: none;
@@ -88,12 +116,19 @@
   width: var(--tap);
   min-height: var(--tap);
   padding: 0;
+  margin: calc(-1 * var(--s2)) calc(-1 * var(--s2)) calc(-1 * var(--s2)) 0;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .shop-quiet {
+  /* 44px floor: this sits beside "Add" — a narrow ✕ invites leftward misses
+     that open the create sheet mid-trip. */
+  min-width: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--muted);
@@ -104,10 +139,25 @@
   text-underline-offset: 2px;
 }
 
-/* -- in-cart rows are dimmed confirmations; their one control is the quiet
-   "Put back" escape hatch (a .shop-quiet inside the row) ------------------- */
+/* -- in-cart cards are dimmed confirmations -------------------------------- */
 .shop-cart-row { opacity: 0.55; }
-.shop-cart-mark { color: var(--ok); font-size: 20px; padding: 0 var(--s3); }
+/* The done-mark sits where a To Buy card's ✓ button sits — same 52px right
+   column, so a row keeps its landmark when it moves to the cart. */
+.shop-cart-mark {
+  flex-shrink: 0;
+  align-self: center;
+  width: 52px;
+  text-align: center;
+  color: var(--ok);
+  font-size: 20px;
+}
+/* The quiet escape hatch aligns to the card's left text rhythm; negative
+   margins give back most of the 44px target's slack so the dimmed card
+   stays compact (the toast-undo trick). */
+.shop-putback {
+  padding: 0;
+  margin: calc(-1 * var(--s1)) 0 calc(-1 * var(--s2));
+}
 
 /* -- one-shot promote prompt (PLAN.md §1.6) -------------------------------- */
 .shop-prompt {
