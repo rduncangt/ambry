@@ -8,6 +8,7 @@ import {
   fmtQtyUnit,
   ladderLabel,
   parseDec,
+  fmtAgeShort,
 } from "./format";
 import type { Item, LadderRung } from "../types";
 
@@ -278,5 +279,16 @@ describe("fmtLevel refuses to call an unverified zero a shortage", () => {
   it("verified zero still reads Out / 0", () => {
     expect(fmtLevel({ ...base, unit: "jar", quantity: 0, display_mode: "ladder", verified_at: "2026-01-02T00:00:00.000Z" } as Item)).toBe("Out");
     expect(fmtLevel({ ...base, unit: "bag", quantity: 0, display_mode: "number", verified_at: "2026-01-02T00:00:00.000Z" } as Item)).toBe("0 bags");
+  });
+});
+
+describe("fmtAgeShort", () => {
+  const NOW = "2026-08-29T12:00:00.000Z";
+  it("compacts fmtAge's buckets", () => {
+    expect(fmtAgeShort("2026-08-29T11:59:50.000Z", NOW)).toBe("now");
+    expect(fmtAgeShort("2026-08-29T11:15:00.000Z", NOW)).toBe("45m");
+    expect(fmtAgeShort("2026-08-29T07:00:00.000Z", NOW)).toBe("5h");
+    expect(fmtAgeShort("2026-08-17T12:00:00.000Z", NOW)).toBe("12d");
+    expect(fmtAgeShort(null, NOW)).toBe("–");
   });
 });

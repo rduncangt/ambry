@@ -181,3 +181,32 @@
 
 /* -- add-extra foot -------------------------------------------------------- */
 .shop-add { display: flex; gap: var(--s2); margin-top: var(--s3); }
+
+/* The card's name area is a door to the item page: button reset, text stays
+   left-aligned and wraps exactly as the old div did. */
+.shop-open {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.shop-open:active .row-title { color: var(--accent); }
+
+/* Corner stack: age chip beside the trash, both quiet. */
+.shop-corner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+/* The age chip: one glyph-width of list-age ("3d") — scannable down the
+   whole list; the sentence version rides its title attribute. */
+.shop-age {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
