@@ -109,20 +109,23 @@ function InCartRow(props: { item: Item }) {
     }
   };
 
+  // Same two-deck card as To Buy, one deck deep: identity left (name, level
+  // line, the quiet escape hatch), the done-mark on the check-off's right
+  // column — the dimmed card reads as "this row, completed".
   return (
-    <div class="row shop-cart-row">
-      <div class="row-main">
-        <div class="row-title">{item.name}</div>
-        <div class="row-sub">{fmtLevel(item)}</div>
-        <div class="shop-actions">
-          <button class="shop-quiet" type="button" onClick={putBack}>
+    <div class="shop-card shop-cart-row">
+      <div class="shop-card-top">
+        <div class="shop-card-main">
+          <div class="row-title">{item.name}</div>
+          <div class="row-sub">{fmtLevel(item)}</div>
+          <button class="shop-quiet shop-putback" type="button" onClick={putBack}>
             Put back
           </button>
         </div>
+        <span class="shop-cart-mark" aria-hidden="true">
+          ✓
+        </span>
       </div>
-      <span class="shop-cart-mark" aria-hidden="true">
-        ✓
-      </span>
     </div>
   );
 }
@@ -194,7 +197,7 @@ function ToBuyRow(props: {
   // flag without adding stock — already legal); tapping the value opens
   // decimal entry. Quieter than the ✓ on purpose: correcting the amount is
   // secondary to the purchase gesture itself.
-  const actions = entering ? (
+  const amount = entering ? (
     <InlineQtyInput
       initial={fmtQty(pending)}
       onDone={(raw) => {
@@ -207,39 +210,44 @@ function ToBuyRow(props: {
       }}
     />
   ) : (
-    <>
-      <span class="shop-stepper">
-        <Stepper
-          value={`+${qtyLines(pending, item.unit).num}`}
-          unit={qtyLines(pending, item.unit).unit}
-          valueTitle="Amount to buy — tap to type an exact amount"
-          onDelta={(d) => props.onPending(Math.max(0, pending + d))}
-          onTapValue={() => setEntering(true)}
-        />
-      </span>
-      <button
-        class="shop-trash"
-        type="button"
-        aria-label="Remove from list"
-        onClick={removeFromList}
-      >
-        <TrashIcon />
-      </button>
-    </>
+    <span class="shop-stepper">
+      <Stepper
+        value={`+${qtyLines(pending, item.unit).num}`}
+        unit={qtyLines(pending, item.unit).unit}
+        valueTitle="Amount to buy — tap to type an exact amount"
+        onDelta={(d) => props.onPending(Math.max(0, pending + d))}
+        onTapValue={() => setEntering(true)}
+      />
+    </span>
   );
 
+  // Two decks: deck 1 is identity (name + caption, the quiet remove in the
+  // corner), deck 2 is action (amount capsule left, THE check-off right) —
+  // reading and deciding happen on one line, acting on the next.
   return (
-    <div class="row shop-row">
-      <div class="row-main">
-        <div class="row-title">{item.name}</div>
-        <div class="row-sub">
-          {fmtLevel(item)} · {provenance}
+    <div class="shop-card">
+      <div class="shop-card-top">
+        <div class="shop-card-main">
+          <div class="row-title">{item.name}</div>
+          <div class="row-sub">
+            {fmtLevel(item)} · {provenance}
+          </div>
         </div>
-        <div class="shop-actions">{actions}</div>
+        <button
+          class="shop-trash"
+          type="button"
+          aria-label="Remove from list"
+          onClick={removeFromList}
+        >
+          <TrashIcon />
+        </button>
       </div>
-      <button class="shop-check" type="button" aria-label={`Bought ${item.name}`} onClick={buy}>
-        ✓
-      </button>
+      <div class="shop-card-acts">
+        {amount}
+        <button class="shop-check" type="button" aria-label={`Bought ${item.name}`} onClick={buy}>
+          ✓
+        </button>
+      </div>
     </div>
   );
 }
@@ -282,18 +290,22 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
     <div class="shop-section">
       <h2 class="shop-section-title">Extras</h2>
       {props.extras.map((extra) => (
-        <div key={extra.id} class="row">
-          <div class="row-main">
-            <div class="row-title">{extra.text}</div>
+        // Same card rhythm as To Buy, one deck: an extra has no amount or
+        // caption, so the ✓ sits directly on the name line's right column.
+        <div key={extra.id} class="shop-card">
+          <div class="shop-card-top shop-card-center">
+            <div class="shop-card-main">
+              <div class="row-title">{extra.text}</div>
+            </div>
+            <button
+              class="shop-check"
+              type="button"
+              aria-label={`Got ${extra.text}`}
+              onClick={() => check(extra)}
+            >
+              ✓
+            </button>
           </div>
-          <button
-            class="shop-check"
-            type="button"
-            aria-label={`Got ${extra.text}`}
-            onClick={() => check(extra)}
-          >
-            ✓
-          </button>
         </div>
       ))}
       {prompt !== null && (

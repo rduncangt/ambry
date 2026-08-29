@@ -33,8 +33,13 @@
 
 /* The quantity block is the screen's centerpiece — scale the shared control up. */
 .item-qty-block { align-items: flex-start; }
-.item-qty-block .qty-value,
-.item-qty-block .stepper-value { font-size: 22px; }
+.item-qty-block .stepper-value {
+  font-size: 22px;
+  /* The 76px cap exists for tight list rows; the overlay is full-width and
+     its non-brief unit line ("bags · 400 g") must never ellipsize away the
+     precise side it exists to show. */
+  max-width: none;
+}
 .item-wide { width: 100%; }
 
 .item-inline {
