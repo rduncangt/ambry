@@ -56,18 +56,9 @@
   font-weight: 600;
 }
 
-/* Section heading ("Low & flagged") — the location headers' quiet voice,
-   minus their per-word capitalization. */
-.inv-sec {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin-top: var(--s3);
-}
-
 /* Location cards — the default screen is a shelf directory, not the full
-   list: one generous tappable card per location. */
+   list: one generous tappable card per location. (The "Low & flagged" strip
+   that once sat above them is gone — flags live on the Shopping tab.) */
 .loc-cards {
   list-style: none;
   margin: var(--s3) 0 0;

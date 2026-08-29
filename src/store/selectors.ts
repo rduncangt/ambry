@@ -37,7 +37,11 @@ export interface ShoppingList {
   toBuy: Item[];
   /** Live extras, oldest first. */
   extras: ShoppingExtra[];
-  /** Items with a `purchase` event since local midnight — the dimmed in-cart section. */
+  /**
+   * Items with a `purchase` event since local midnight — the dimmed in-cart
+   * section. Currently-flagged items are excluded: a put-back (or re-flagged)
+   * item belongs to To Buy and must never appear in both sections at once.
+   */
   inCart: Item[];
 }
 
@@ -65,17 +69,30 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
     if (item.deleted_at === null) liveById.set(item.id, item);
   }
   // First qualifying purchase decides order; a re-purchase (bought 2, went
-  // back for 1 more) must not duplicate the row.
+  // back for 1 more) must not duplicate the row. Flagged items are excluded:
+  // unpurchase re-raises the flag, so a put-back row moves (whole, not
+  // duplicated) back to the To Buy section above.
   const seen = new Set<string>();
+  // Reversal-aware: per item, the LATEST of today's {purchase, "put back"
+  // reversal recount} decides. Without this, a reversed check-off resurfaces
+  // as "in the cart" the moment its re-raised flag is later cleared — a dim
+  // row claiming stock that never came home. Both reversal paths (Put back
+  // and the undo toast) mark their compensating recount with note "put back".
   const inCart: Item[] = [];
-  for (const e of doc.events) {
-    if (e.kind !== "purchase") continue;
+  const decided = new Set<string>();
+  for (let i = doc.events.length - 1; i >= 0; i--) {
+    const e = doc.events[i];
+    if (e === undefined || decided.has(e.item_id)) continue;
     if (Date.parse(e.at) < midnight) continue;
-    if (seen.has(e.item_id)) continue;
-    seen.add(e.item_id);
+    const isPurchase = e.kind === "purchase";
+    const isReversal = e.kind === "recount" && e.note === "put back";
+    if (!isPurchase && !isReversal) continue;
+    decided.add(e.item_id);
+    if (!isPurchase) continue; // latest word on this item today: reversed
     const item = liveById.get(e.item_id);
-    if (item !== undefined) inCart.push(item);
+    if (item !== undefined && !item.flagged) inCart.push(item);
   }
+  inCart.reverse(); // newest-first scan; restore first-purchase order
 
   return { toBuy, extras, inCart };
 }
@@ -136,29 +153,6 @@ export function isLow(item: Item): boolean {
     item.threshold !== null &&
     item.quantity <= item.threshold
   );
-}
-
-/**
- * The "Low & flagged" attention list: live items needing action — flagged
- * ones first (oldest flagged_at first, the shopping list's rule), then
- * unflagged low items by name. A flag is a human act, so flagged items
- * appear even while uncounted — the Shopping tab counts them, and this list
- * must agree. The uncounted guard protects only the threshold-derived branch
- * (it lives inside isLow): a pile of seeded "?" rows must not drown the real
- * shortages, and threshold flags only raise on quantity writes, so the
- * seeded pile can never flood in through the flagged branch either.
- */
-export function attentionItems(doc: AmbryDoc): Item[] {
-  const flagged: Item[] = [];
-  const low: Item[] = [];
-  for (const item of doc.items) {
-    if (item.deleted_at !== null) continue;
-    if (item.flagged) flagged.push(item);
-    else if (isLow(item)) low.push(item);
-  }
-  flagged.sort((a, b) => isoAsc(a.flagged_at, b.flagged_at));
-  low.sort((a, b) => alpha(a.name, b.name));
-  return [...flagged, ...low];
 }
 
 /** The physical walk order of the standard shelves; everything else follows alphabetically. */

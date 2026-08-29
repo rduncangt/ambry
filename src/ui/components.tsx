@@ -262,6 +262,11 @@ export function QtyControl(props: {
   const burstRestore = useRef<{
     itemId: string;
     qtyBefore: number;
+    /** The coalesced event's identity — coalescing updates one event in
+     *  place, so "same id before and after the write" is exact proof of a
+     *  continuing burst (qtyBefore alone can collide with an earlier no-op
+     *  write at the same quantity and resurrect a stale snapshot). */
+    eventId: string;
     restore: ReturnType<typeof flagsBefore>;
   } | null>(null);
 
@@ -291,13 +296,16 @@ export function QtyControl(props: {
     const effective =
       prev !== null &&
       before !== null &&
-      before.itemId === after.itemId &&
-      before.qtyBefore === after.qtyBefore &&
-      prev.itemId === after.itemId &&
-      prev.qtyBefore === after.qtyBefore
+      before.eventId === after.eventId && // coalesced: same event updated in place
+      prev.eventId === after.eventId
         ? prev.restore
         : restore;
-    burstRestore.current = { itemId: after.itemId, qtyBefore: after.qtyBefore, restore: effective };
+    burstRestore.current = {
+      itemId: after.itemId,
+      qtyBefore: after.qtyBefore,
+      eventId: after.eventId,
+      restore: effective,
+    };
     fireUndoToast(effective);
   };
 

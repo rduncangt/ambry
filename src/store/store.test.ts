@@ -11,6 +11,7 @@ import { COALESCE_MS, SAVE_DEBOUNCE_MS, createStore, type Store } from "./store"
 import { historyFor } from "../domain/merge";
 import { planUnitChange } from "../domain/units";
 import { parseImport } from "../domain/exportImport";
+import { shoppingList } from "./selectors";
 
 // ---------------------------------------------------------------------------
 // Deterministic deps
@@ -148,10 +149,19 @@ describe("createItem", () => {
     expect(store.createItem({ name: "b", quantity: -3 }).quantity).toBe(0);
   });
 
-  it("does not auto-flag at creation even at/below threshold (edge-triggered)", () => {
+  it("does not auto-flag at creation even at/below threshold (create is not a gesture; the first COUNT flags)", () => {
     const { store } = fresh();
     const item = store.createItem({ name: "a", quantity: 0, threshold: 1 });
     expect(item.flagged).toBe(false);
+  });
+
+  it("the first count of a created item landing at/below threshold flags (first observation)", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "a", quantity: 0, threshold: 3 });
+    clock.advance(5000);
+    store.setQuantity(item.id, 3); // first observation, landing exactly AT
+    expect(item.flagged).toBe(true);
+    expect(item.flag_source).toBe("threshold");
   });
 });
 
@@ -369,6 +379,90 @@ describe("threshold flag lifecycle", () => {
   });
 });
 
+describe("unpurchase (put back from the cart)", () => {
+  it("round-trips a mistapped purchase: quantity, flag, and list membership all restored", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "butter", unit: "stick", quantity: 2, threshold: 1 });
+    clock.advance(5000);
+    store.adjustQuantity(item.id, -1.5); // 2 -> 0.5: flagged
+    expect(item.flagged).toBe(true);
+    expect(shoppingList(store.getDoc(), clock.now()).toBuy).toEqual([item]);
+
+    clock.advance(5000);
+    store.purchase(item.id); // 0.5 -> 1.5, flag cleared
+    expect(item.flagged).toBe(false);
+    let list = shoppingList(store.getDoc(), clock.now());
+    expect(list.toBuy).toEqual([]);
+    expect(list.inCart).toEqual([item]);
+
+    clock.advance(5000);
+    store.unpurchase(item.id);
+    // Quantity back to the purchase event's qty_before via a compensating
+    // recount; NO verified_at stamp (nothing was observed).
+    expect(item.quantity).toBe(0.5);
+    expect(item.verified_at).toBeNull();
+    expect(lastEvent(store)).toMatchObject({
+      kind: "recount",
+      qty_before: 1.5,
+      qty_after: 0.5,
+      note: "put back",
+    });
+    // The flag re-raises as a fresh human decision: manual provenance, now.
+    expect(item.flagged).toBe(true);
+    expect(item.flag_source).toBe("manual");
+    expect(item.flagged_at).toBe("2026-08-27T12:00:15.000Z");
+    // Back in To Buy, gone from In the cart — never in both.
+    list = shoppingList(store.getDoc(), clock.now());
+    expect(list.toBuy).toEqual([item]);
+    expect(list.inCart).toEqual([]);
+  });
+
+  it("no-ops without a same-day purchase (none at all, or only an old one)", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "rice", quantity: 3 });
+    const eventsBefore = store.getDoc().events.length;
+
+    // No purchase ever: nothing happens, silently.
+    store.unpurchase(item.id);
+    expect(store.getDoc().events).toHaveLength(eventsBefore);
+    expect(item.quantity).toBe(3);
+    expect(item.flagged).toBe(false);
+
+    // A purchase two days ago is before ANY timezone's local midnight of now.
+    clock.advance(1000);
+    store.purchase(item.id); // 3 -> 4
+    clock.advance(2 * 86_400_000);
+    const eventsAfterBuy = store.getDoc().events.length;
+    store.unpurchase(item.id);
+    expect(store.getDoc().events).toHaveLength(eventsAfterBuy);
+    expect(item.quantity).toBe(4);
+    expect(item.flagged).toBe(false);
+  });
+
+  it("reverses a purchase whose amount was edited inline", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "eggs", quantity: 1, restock_amount: 6 });
+    clock.advance(5000);
+    store.purchase(item.id, 12); // corrected amount: 1 -> 13
+    clock.advance(5000);
+    store.unpurchase(item.id);
+    expect(item.quantity).toBe(1); // qty_before of THAT event, not restock math
+    expect(item.flagged).toBe(true);
+  });
+
+  it("reverses only the MOST RECENT same-day purchase (went back for one more)", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "milk", quantity: 1 });
+    clock.advance(5000);
+    store.purchase(item.id); // 1 -> 2
+    clock.advance(5000);
+    store.purchase(item.id); // 2 -> 3
+    clock.advance(5000);
+    store.unpurchase(item.id);
+    expect(item.quantity).toBe(2); // the second purchase's qty_before
+  });
+});
+
 describe("never_prompt and manual flags", () => {
   it("never_prompt suppresses auto-raise; manual flag still works", () => {
     const { store, clock } = fresh();
@@ -490,11 +584,11 @@ describe("undoQuantity + lastQuantityWrite", () => {
     const item = store.createItem({ name: "a", quantity: 2 });
     clock.advance(5000);
     store.adjustQuantity(item.id, -1);
-    expect(store.lastQuantityWrite()).toEqual({ itemId: item.id, qtyBefore: 2 });
+    expect(store.lastQuantityWrite()).toMatchObject({ itemId: item.id, qtyBefore: 2 });
     // A delete event afterwards is skipped by the scan.
     clock.advance(5000);
     store.softDelete(item.id);
-    expect(store.lastQuantityWrite()).toEqual({ itemId: item.id, qtyBefore: 2 });
+    expect(store.lastQuantityWrite()).toMatchObject({ itemId: item.id, qtyBefore: 2 });
   });
 
   it("a coalesced burst undoes to the PRE-burst value", () => {
@@ -504,7 +598,7 @@ describe("undoQuantity + lastQuantityWrite", () => {
     store.adjustQuantity(item.id, 1);
     clock.advance(100);
     store.adjustQuantity(item.id, 1);
-    expect(store.lastQuantityWrite()).toEqual({ itemId: item.id, qtyBefore: 6 });
+    expect(store.lastQuantityWrite()).toMatchObject({ itemId: item.id, qtyBefore: 6 });
   });
 
   it("undo is a compensating recount WITHOUT a verified_at stamp", () => {
@@ -576,8 +670,9 @@ describe("undoQuantity + lastQuantityWrite", () => {
     expect(item.flagged).toBe(false);
     const undo = store.lastQuantityWrite();
     clock.advance(1000);
-    // The compensating 2 -> 1 recount is NOT a fresh crossing (before must be
-    // strictly above the threshold), so only restoreFlags can re-raise here.
+    // The compensating 2 -> 1 recount would raise on its own under the
+    // lands-at-or-below rule, but with a FRESH flagged_at — restoreFlags
+    // must win so the original raise time (and list order) comes back.
     store.undoQuantity(undo!.itemId, undo!.qtyBefore, flagsBefore);
     expect(item.quantity).toBe(1);
     expect(item.flagged).toBe(true);
@@ -1387,5 +1482,32 @@ describe("undoQuantity verified_at restore", () => {
     const stamped = item.verified_at;
     store.undoQuantity(item.id, 2, { flagged: false, flag_source: null, flagged_at: null });
     expect(item.verified_at).toBe(stamped);
+  });
+});
+
+describe("unpurchase composes with intervening writes", () => {
+  it("reverses the purchase's delta, preserving a recount made in between", () => {
+    const { store } = fresh();
+    const item = store.createItem({ name: "Milk", quantity: 1, threshold: 1 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1); // 1 -> 2, flag clears
+    store.setQuantity(item.id, 3); // human found another carton: verified 3
+    const stamp = item.verified_at;
+    store.unpurchase(item.id);
+    expect(item.quantity).toBe(2); // 3 minus the purchase's +1 — not snap-to-1
+    expect(item.verified_at).toBe(stamp); // observation untouched
+    expect(item.flagged).toBe(true); // back on the list
+  });
+
+  it("lastQuantityWrite exposes a stable eventId across a coalesced burst", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "Rice", quantity: 5 });
+    store.adjustQuantity(item.id, -1);
+    const a = store.lastQuantityWrite();
+    clock.advance(500); // within COALESCE_MS
+    store.adjustQuantity(item.id, -1);
+    const b = store.lastQuantityWrite();
+    expect(a?.eventId).toBeDefined();
+    expect(b?.eventId).toBe(a?.eventId); // same event, updated in place
   });
 });

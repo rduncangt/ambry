@@ -11,7 +11,7 @@
  * `at` in place instead of appending. Safe under R2 (nothing references
  * events). All other kinds always append.
  *
- * Undo: a 5-second UI toast undoes the last quantity write as a COMPENSATING
+ * Undo: a 3-second UI toast undoes the last quantity write as a COMPENSATING
  * recount event (history stays append-only) — lastQuantityWrite() feeds it.
  */
 import {
@@ -81,7 +81,7 @@ export interface Store {
   subscribe(listener: () => void): () => void;
   bootStatus(): BootStatus;
   /** Most recent quantity-affecting event (for the undo toast), if within its undo window. */
-  lastQuantityWrite(): { itemId: string; qtyBefore: number } | null;
+  lastQuantityWrite(): { itemId: string; qtyBefore: number; eventId: string } | null;
   /**
    * True while the most recent save attempt threw (e.g. quota exceeded). The
    * doc stays dirty so flush()/the next mutation retries; the next successful
@@ -119,6 +119,16 @@ export interface Store {
   /** Shopping check-off: qty += amount ?? restock_amount, kind `purchase`, ALWAYS clears the flag. */
   purchase(id: string, amount?: number): void;
   /**
+   * Put back from the cart: reverse the item's most recent purchase since
+   * LOCAL midnight (the same same-day rule the inCart selector uses).
+   * Quantity returns to that purchase event's qty_before via a compensating
+   * `recount` (note "put back", NO verified_at stamp — nothing was observed,
+   * a tap was retracted), and the flag re-raises (flag_source "manual",
+   * flagged_at now) so the item goes back to To Buy. Silently no-ops when
+   * the item has no purchase today.
+   */
+  unpurchase(id: string): void;
+  /**
    * Undo the last quantity write: compensating `recount` back to qtyBefore
    * (no verified_at stamp). Callers capture the item's flag triple BEFORE
    * their write and pass it as `restoreFlags`; those three fields are applied
@@ -138,11 +148,17 @@ export interface Store {
        *  path manufactures the exact false-Out drift it exists to prevent. */
       verified_at?: string | null;
     },
+    opts?: {
+      /** Reversal marker for the event log (e.g. "put back" when undoing a
+       *  purchase) — the inCart selector reads it to keep a reversed
+       *  check-off out of the "In the cart" section. */
+      note?: string;
+    },
   ): void;
 
   // -- flags --------------------------------------------------------------
   flagManual(id: string): void;
-  /** "Have plenty" / no longer needed (PLAN.md §1.2 fix 4). */
+  /** "Remove from list" / no longer needed (PLAN.md §1.2 fix 4). */
   clearFlag(id: string): void;
   setNeverPrompt(id: string, value: boolean): void;
   /** Audit ✓ — stamps verified_at, NO event. */
@@ -450,11 +466,11 @@ export function createStore(
 
     lastQuantityWrite() {
       // Pure scan over the log, newest first — no extra state to persist or
-      // to fall out of sync (the 5 s window itself is UI-owned toast state).
+      // to fall out of sync (the 3 s window itself is UI-owned toast state).
       for (let i = doc.events.length - 1; i >= 0; i--) {
         const e = doc.events[i];
         if (e === undefined) continue;
-        if (isGestureKind(e.kind)) return { itemId: e.item_id, qtyBefore: e.qty_before };
+        if (isGestureKind(e.kind)) return { itemId: e.item_id, qtyBefore: e.qty_before, eventId: e.id };
       }
       return null;
     },
@@ -566,13 +582,47 @@ export function createStore(
       commitQuantity(item, item.quantity + (amount ?? item.restock_amount), "purchase");
     },
 
-    undoQuantity(itemId, qtyBefore, restoreFlags) {
+    unpurchase(id) {
+      const item = itemById(id);
+      // Same "today" as the inCart selector: the shopper's LOCAL midnight,
+      // not UTC's — the two must agree on which purchases are put-backable.
+      const midnightLocal = new Date(nowFn());
+      midnightLocal.setHours(0, 0, 0, 0);
+      const midnight = midnightLocal.getTime();
+      // Newest-first scan for the item's most recent same-day purchase.
+      let target: HistoryEvent | undefined;
+      for (let i = doc.events.length - 1; i >= 0; i--) {
+        const e = doc.events[i];
+        if (e === undefined || e.item_id !== id || e.kind !== "purchase") continue;
+        if (Date.parse(e.at) >= midnight) target = e;
+        break; // an older most-recent purchase means nothing bought today
+      }
+      if (target === undefined) return; // no same-day purchase: nothing to put back
+      // Through the normal commit path. restoreFlags is the same in-commit
+      // flag override the undo path uses: the re-raise must land atomically
+      // with the quantity reversal, and "manual"/now is honest provenance —
+      // putting it back on the list IS a fresh human decision. No
+      // verified_at key, so the observation stamp stays untouched.
+      // Reverse the purchase's DELTA rather than restoring its qty_before:
+      // identical when nothing intervened, but a human recount between
+      // check-off and put-back must survive — snapping to qty_before would
+      // wipe an observation and leave verified_at vouching for a number
+      // nobody holds (manufactured drift).
+      commitQuantity(item, item.quantity - (target.qty_after - target.qty_before), "recount", {
+        note: "put back",
+        restoreFlags: { flagged: true, flag_source: "manual", flagged_at: nowFn() },
+      });
+    },
+
+    undoQuantity(itemId, qtyBefore, restoreFlags, opts) {
       const item = itemById(itemId);
       // Compensating recount, NOT a human observation: no verified_at stamp
       // (the human confirmed nothing — they retracted a tap). restoreFlags,
       // when the caller captured it, rides in the same commit so undo also
       // reverses flag changes the retracted write made.
-      commitQuantity(item, qtyBefore, "recount", { restoreFlags });
+      const o: Parameters<typeof commitQuantity>[3] = { restoreFlags };
+      if (opts?.note !== undefined) o.note = opts.note;
+      commitQuantity(item, qtyBefore, "recount", o);
     },
 
     // -- flags --------------------------------------------------------------
