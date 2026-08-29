@@ -11,7 +11,7 @@ import { COALESCE_MS, SAVE_DEBOUNCE_MS, createStore, type Store } from "./store"
 import { historyFor } from "../domain/merge";
 import { planUnitChange } from "../domain/units";
 import { parseImport } from "../domain/exportImport";
-import { shoppingList } from "./selectors";
+import { purchaseRhythm, shoppingList } from "./selectors";
 
 // ---------------------------------------------------------------------------
 // Deterministic deps
@@ -1566,5 +1566,136 @@ describe("finishTrip", () => {
   it("finishing an empty cart reports zero and stays harmless", () => {
     const { store } = fresh();
     expect(store.finishTrip()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteEvent — the history record edit
+// ---------------------------------------------------------------------------
+
+describe("deleteEvent", () => {
+  it("removes exactly the named events; unknown ids are ignored", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "jam", unit: "jar", quantity: 3 });
+    clock.advance(COALESCE_MS + 1);
+    store.adjustQuantity(item.id, -1);
+    const use = lastEvent(store);
+    const writes = store.getDoc().settings.writes_since_export;
+    store.deleteEvent([use.id, "no-such-id"]);
+    const doc = store.getDoc();
+    expect(doc.events.map((e) => e.id)).not.toContain(use.id);
+    expect(doc.events.map((e) => e.kind)).toEqual(["create"]); // NO new event written
+    // One committed mutation, unknown id notwithstanding.
+    expect(doc.settings.writes_since_export).toBe(writes + 1);
+  });
+
+  it("a call matching nothing commits nothing (no phantom write)", () => {
+    const { store } = fresh();
+    store.createItem({ name: "salt" });
+    const writes = store.getDoc().settings.writes_since_export;
+    store.deleteEvent(["ghost"]);
+    expect(store.getDoc().settings.writes_since_export).toBe(writes);
+    expect(store.getDoc().events).toHaveLength(1);
+  });
+
+  it("leaves quantity, flags and verified_at exactly as they stood (R2)", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "milk", unit: "carton", quantity: 3, threshold: 1 });
+    clock.advance(COALESCE_MS + 1);
+    store.setQuantity(item.id, 1); // crossing recount: flags + stamps verified_at
+    const recount = lastEvent(store);
+    expect(item.flagged).toBe(true);
+    const verifiedAt = item.verified_at;
+    store.deleteEvent([recount.id]);
+    expect(item.quantity).toBe(1);
+    expect(item.flagged).toBe(true);
+    expect(item.flag_source).toBe("threshold");
+    expect(item.verified_at).toBe(verifiedAt);
+    expect(item.deleted_at).toBeNull();
+  });
+
+  it("deleting BOTH halves of a put-back pair leaves rhythm and receipt coherent", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "coffee", unit: "bag", quantity: 1 });
+    clock.advance(COALESCE_MS + 1);
+    store.purchase(item.id); // a real, kept purchase earlier today
+    clock.advance(3_600_000);
+    store.purchase(item.id);
+    expect(store.unpurchase(item.id)).toBe(true); // reverses the second one
+    const doc = store.getDoc();
+    const putBack = lastEvent(store);
+    expect(putBack).toMatchObject({ kind: "recount", note: "put back" });
+    const purchases = doc.events.filter((e) => e.kind === "purchase");
+    const reversed = purchases[1];
+    if (reversed === undefined) throw new Error("expected two purchases");
+
+    // Rhythm already ignored the reversed pair; deleting it must not change
+    // what the rhythm reports (both views derive — nothing references events).
+    const before = purchaseRhythm(doc, item.id, clock.now());
+    expect(before.count).toBe(1);
+    store.deleteEvent([putBack.id, reversed.id]);
+    expect(purchaseRhythm(store.getDoc(), item.id, clock.now())).toEqual(before);
+
+    // Receipt: the put-back re-flagged the item, so it sits in To Buy — and
+    // with the pair gone it must not resurface in the cart, nor ever sit in
+    // both sections at once.
+    const list = shoppingList(store.getDoc(), clock.now());
+    expect(list.toBuy.map((i) => i.id)).toEqual([item.id]);
+    expect(list.inCart).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Declared locations
+// ---------------------------------------------------------------------------
+
+describe("addLocation / removeLocation", () => {
+  it("addLocation trims, declares, returns the casing, and commits once", () => {
+    const { store } = fresh();
+    expect(store.addLocation("  Garage  ")).toBe("Garage");
+    expect(store.getDoc().settings.declared_locations).toEqual(["Garage"]);
+    expect(store.getDoc().settings.writes_since_export).toBe(1);
+  });
+
+  it("re-adding resolves case-insensitively: no duplicate, existing casing wins", () => {
+    const { store } = fresh();
+    store.addLocation("Garage");
+    expect(store.addLocation("garage")).toBe("Garage");
+    expect(store.getDoc().settings.declared_locations).toEqual(["Garage"]);
+    // The second call changed nothing, so it committed nothing.
+    expect(store.getDoc().settings.writes_since_export).toBe(1);
+  });
+
+  it("a shelf items already use resolves to its casing and is NOT re-declared", () => {
+    const { store } = fresh();
+    store.createItem({ name: "peas", location: "freezer" });
+    expect(store.addLocation("Freezer")).toBe("freezer");
+    expect(store.getDoc().settings.declared_locations).toEqual([]);
+  });
+
+  it('blank input returns "" and commits nothing', () => {
+    const { store } = fresh();
+    expect(store.addLocation("   ")).toBe("");
+    expect(store.getDoc().settings.declared_locations).toEqual([]);
+    expect(store.getDoc().settings.writes_since_export).toBe(0);
+  });
+
+  it("removeLocation removes case-insensitively and never touches items", () => {
+    const { store } = fresh();
+    store.addLocation("Garage");
+    const item = store.createItem({ name: "peas", location: "Garage" });
+    store.removeLocation("garage");
+    expect(store.getDoc().settings.declared_locations).toEqual([]);
+    // The item keeps its shelf string — declared_locations references nothing.
+    expect(store.getDoc().items.find((i) => i.id === item.id)?.location).toBe("Garage");
+  });
+
+  it("removing an undeclared location is a no-op", () => {
+    const { store } = fresh();
+    store.addLocation("Garage");
+    const writes = store.getDoc().settings.writes_since_export;
+    store.removeLocation("attic");
+    expect(store.getDoc().settings.declared_locations).toEqual(["Garage"]);
+    expect(store.getDoc().settings.writes_since_export).toBe(writes);
   });
 });

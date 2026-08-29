@@ -2,7 +2,7 @@
  * App shell: boot gate → banner stack → current view → overlays → tab bar.
  * All state flows from useDoc(); all writes go through the Store commands.
  */
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useState, useRef } from "preact/hooks";
 import { backupAgeDays, exportNag, shoppingList } from "../store/selectors";
 import type { Store } from "../store/store";
 import { EXPORT_NAG_DAYS, now , type AmbryDoc } from "../types";
@@ -62,6 +62,24 @@ function Shell() {
   const doc = useDoc();
   const nav = useNav();
   const toast = useToast();
+  // The toast pill is tap-through EXCEPT its Undo button — which must never
+  // sit on a banner's action (Export/Reload). Publish the banner stack's
+  // live height as a CSS var; the pill docks below it (styles.css .toast).
+  const bannersRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bannersRef.current;
+    if (el === null) return;
+    const root = document.documentElement;
+    const publish = (): void =>
+      root.style.setProperty("--banners-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      root.style.setProperty("--banners-h", "0px");
+    };
+  }, []);
 
   // Update pill: main.tsx registered the SW; the bridge hands us apply().
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
@@ -83,7 +101,7 @@ function Shell() {
 
   return (
     <div class="app">
-      <div class="banners">
+      <div class="banners" ref={bannersRef}>
         {/* Storage banners read the store directly each render — the store
             notifies subscribers when either flag flips, and useDoc() above
             already re-renders this component on every notify. */}
@@ -142,7 +160,10 @@ function Shell() {
 
       {nav.openItemId !== null && (
         <div class="overlay">
-          <header class="screen-head">
+          {/* Sticky: deep in a long item page, "which item is this?" must
+              stay answered — the header pins below the status-bar inset and
+              rows slide under it (styles.css .overlay-head). */}
+          <header class="screen-head overlay-head">
             <button class="back-btn" type="button" onClick={nav.closeItem}>
               ‹ Back
             </button>

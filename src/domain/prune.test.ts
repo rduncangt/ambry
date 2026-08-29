@@ -46,6 +46,7 @@ function makeDoc(overrides: Partial<AmbryDoc> = {}): AmbryDoc {
       last_export_at: null,
       writes_since_export: 0,
       last_trip_ended_at: null,
+      declared_locations: [],
       device_label: "test",
     },
     ...overrides,
@@ -136,7 +137,7 @@ describe("pruneDoc — events", () => {
         makeEvent({ at: daysAgo(10) }), // exactly at the cutoff — not "older than"
         makeEvent({ at: daysAgo(1) }),
       ],
-      settings: { retention_days: 10, last_export_at: null, writes_since_export: 0, last_trip_ended_at: null, device_label: "test" },
+      settings: { retention_days: 10, last_export_at: null, writes_since_export: 0, last_trip_ended_at: null, declared_locations: [], device_label: "test" },
     });
     const res = pruneDoc(doc, NOW);
     expect(res.eventsRemoved).toBe(0);
@@ -148,7 +149,7 @@ describe("pruneDoc — events", () => {
     const fresh = makeEvent({ at: daysAgo(1) });
     const doc = makeDoc({
       events: [past, fresh],
-      settings: { retention_days: 10, last_export_at: null, writes_since_export: 0, last_trip_ended_at: null, device_label: "test" },
+      settings: { retention_days: 10, last_export_at: null, writes_since_export: 0, last_trip_ended_at: null, declared_locations: [], device_label: "test" },
     });
     const res = pruneDoc(doc, NOW);
     expect(res.doc.events).toEqual([fresh]);

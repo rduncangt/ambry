@@ -148,6 +148,24 @@ body::after {
   overflow-y: auto;
   padding: env(safe-area-inset-top) var(--s4) calc(env(safe-area-inset-bottom) + var(--s5));
 }
+/* .overlay-head — the item overlay's sticky "‹ Back · name" bar, same
+   visual voice as .sticky-head. The overlay IS the scroll container and
+   already carries env(safe-area-inset-top) as padding, so the header rests
+   exactly one inset from the top: sticking at top = that same inset pins it
+   in place with NO double inset and no jump. Opaque ground + a z-index above
+   the rows makes content visibly slide under it; the strip above (the
+   status-bar band) is masked by .overlay::before (z 1), which the header
+   tucks under. Negative side margins run the ground across the overlay's
+   full padding width. */
+.overlay-head {
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 2;
+  background: var(--bg);
+  margin: 0 calc(-1 * var(--s4)) var(--s2);
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--line);
+}
 .overlay-body { padding-top: var(--s2); }
 .overlay::before {
   content: "";
@@ -157,7 +175,9 @@ body::after {
   right: 0;
   height: env(safe-area-inset-top);
   background: var(--bg);
-  z-index: 1;
+  /* Above the sticky .overlay-head (2): a rubber-band bounce can carry the
+     pinned header up into the status-bar band, and the mask must win there. */
+  z-index: 3;
   pointer-events: none;
 }
 
@@ -386,7 +406,7 @@ body::after {
    phase (hooks.ts unmounts after the slide). */
 .toast {
   position: fixed;
-  top: calc(env(safe-area-inset-top) + var(--s2));
+  top: calc(env(safe-area-inset-top) + var(--banners-h, 0px) + var(--s2));
   right: calc(env(safe-area-inset-right) + var(--s3)); /* landscape notch */
   max-width: 72%;
   z-index: 60;

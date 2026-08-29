@@ -117,6 +117,11 @@ export interface Settings {
    *  finishing clears it immediately and the next check-off opens a fresh
    *  trip. Null = no trip ever finished. */
   last_trip_ended_at: string | null;
+  /** Locations declared by hand ("set up the garage freezer before filling
+   *  it"): plain strings, unioned case-insensitively with the locations
+   *  items already use, so an empty shelf can exist as a zero-count card.
+   *  Never referenced by items — removing an entry touches nothing else. */
+  declared_locations: string[];
   /** Goes into the export envelope. */
   device_label: string;
 }
