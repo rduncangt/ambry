@@ -18,7 +18,7 @@ import { useState } from "preact/hooks";
 import { fmtAge, fmtLevel, fmtQty, parseDec } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
-import { CartDoneIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
+import { CartMinusIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./shopping.css";
 
@@ -115,24 +115,25 @@ function InCartRow(props: { item: Item }) {
     }
   };
 
-  // Same two-deck card as To Buy, one deck deep: identity left (name, level
-  // line, the quiet escape hatch), the done-mark on the check-off's right
-  // column — the dimmed card reads as "this row, completed". The mark is
-  // the FILLED state of the check-off's cart glyph, so a row keeps one
-  // continuous landmark as it moves between sections.
+  // Same two-deck card as To Buy, one deck deep: identity left, and in the
+  // check-off's right column its mirror — cart-minus takes the row back out
+  // of the cart from the exact spot cart-plus put it in. No decorative
+  // "in cart" mark: inside this section it would only restate the header.
   return (
     <div class="shop-card shop-cart-row">
       <div class="shop-card-top">
         <div class="shop-card-main">
           <div class="row-title">{item.name}</div>
           <div class="row-sub">{fmtLevel(item)}</div>
-          <button class="shop-quiet shop-putback" type="button" onClick={putBack}>
-            Put back
-          </button>
         </div>
-        <span class="shop-cart-mark" aria-hidden="true">
-          <CartDoneIcon />
-        </span>
+        <button
+          class="shop-check shop-check-remove"
+          type="button"
+          aria-label={`Put ${item.name} back — remove from cart`}
+          onClick={putBack}
+        >
+          <CartMinusIcon />
+        </button>
       </div>
     </div>
   );
@@ -255,7 +256,7 @@ function ToBuyRow(props: {
       <div class="shop-card-acts">
         {amount}
         <button
-          class="shop-check"
+          class="shop-check shop-check-add"
           type="button"
           aria-label={`Add ${item.name} to cart`}
           onClick={buy}
@@ -314,7 +315,7 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
               <div class="row-title">{extra.text}</div>
             </div>
             <button
-              class="shop-check"
+              class="shop-check shop-check-add"
               type="button"
               aria-label={`Got ${extra.text}`}
               onClick={() => check(extra)}
