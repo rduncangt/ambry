@@ -242,7 +242,16 @@ export function InventoryView() {
       </header>
 
       {searching ? (
-        <SearchResults query={query} nowIso={nowIso} openLocation={open} />
+        <SearchResults
+          query={query}
+          nowIso={nowIso}
+          openLocation={open}
+          // Success-only (CreateDefaults.onCreated): once the item exists,
+          // the search holding its name is a stale invitation to duplicate
+          // it — clearing drops back to whichever state was beneath (cards
+          // or the open shelf, where the new item now lives).
+          onCreated={() => setQuery("")}
+        />
       ) : openSplit !== null ? (
         <>
           <LocationItems
@@ -440,6 +449,9 @@ function SearchResults(props: {
   /** The location open under the search interlude (its wrapper shape), so
    *  Create files the new item where the user is standing. */
   openLocation: { location: string | null } | null;
+  /** Ridden into openCreate's defaults: runs only after a successful create
+   *  (the owner clears the search query there). */
+  onCreated: () => void;
 }) {
   const doc = useDoc();
   const nav = useNav();
@@ -504,13 +516,14 @@ function SearchResults(props: {
           type="button"
           onClick={() =>
             // Standing in an open shelf, the new item files there (PLAN.md
-            // M1 quick-create: location preselected); otherwise as before.
-            nav.openCreate(
-              trimmed,
-              props.openLocation !== null
+            // M1 quick-create: location preselected); either way onCreated
+            // clears this search once the item actually exists.
+            nav.openCreate(trimmed, {
+              onCreated: props.onCreated,
+              ...(props.openLocation !== null
                 ? { location: props.openLocation.location }
-                : undefined,
-            )
+                : {}),
+            })
           }
         >
           <span class={`row-title inv-create${exactVisible ? " inv-create-anyway" : ""}`}>
@@ -548,8 +561,8 @@ function CartIcon(props: { filled: boolean }) {
 /** One live item: name area opens the detail overlay; QtyControl answers and
  *  writes in place (and owns the 🔕 / Out/– value states / undo toast); the cart
  *  target toggles the manual shopping flag AND carries the flag state (its
- *  filled/outline basket), so the row's flag-dot mark is suppressed —
- *  Shopping/Reconcile rows, which have no cart control, keep the dot. */
+ *  filled/outline basket), so the row's cart mark is suppressed — rows
+ *  without a cart control (Reconcile, the item page) keep the mark. */
 function ItemRow(props: { item: Item; caption: string | null }) {
   const store = useStore();
   const nav = useNav();
