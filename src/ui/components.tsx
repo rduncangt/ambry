@@ -488,12 +488,12 @@ export function CartPlusIcon() {
  *  Solid where CartPlusIcon is open, so a row keeps one continuous landmark
  *  (the cart) as it moves from To Buy to the dimmed cart section. Purely
  *  decorative: aria-hidden, the row's own text carries the state. */
-export function CartDoneIcon() {
-  // The FILLED state of CartPlusIcon's own drawing, same 22px geometry, the
-  // plus replaced by a small check — the row's landmark stays continuous
-  // when it moves from To Buy into the cart. Deliberately NOT the pantry
-  // CartIcon's body: that filled basket means "on the shopping list" one
-  // tab over, and one glyph must not carry opposite meanings.
+export function CartMinusIcon() {
+  // CartPlusIcon's exact geometry with the plus flattened to a minus: the
+  // same spot that put a row into the cart takes it back out, in the same
+  // drawing. (The old filled "done" mark is gone — inside the In-the-cart
+  // section, a cart glyph that only restates the section header is
+  // furniture, not information.)
   return (
     <svg
       viewBox="0 0 24 24"
@@ -506,10 +506,10 @@ export function CartDoneIcon() {
       stroke-linejoin="round"
       aria-hidden="true"
     >
-      <path d="M2.5 6.5h2L6.2 16h9.6l1.9-6.2H4.9" fill="currentColor" />
-      <circle cx="7.6" cy="20.4" r="1.4" fill="currentColor" />
-      <circle cx="14.6" cy="20.4" r="1.4" fill="currentColor" />
-      <path d="M15.9 4.8l2 2 3-3.4" />
+      <path d="M2.5 6.5h2L6.2 16h9.6l1.9-6.2H4.9" />
+      <circle cx="7.6" cy="20.4" r="1.4" />
+      <circle cx="14.6" cy="20.4" r="1.4" />
+      <path d="M16 5.2h5.2" />
     </svg>
   );
 }
