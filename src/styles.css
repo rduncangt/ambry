@@ -14,6 +14,7 @@
   --accent: #8a5a2b;      /* actions, active states */
   --danger: #b3372c;      /* out / destructive / warnings */
   --ok: #3d7a3d;          /* confirmations */
+  --ok-soft: #e4efe0;     /* quiet green wash (cart-plus ground) */
   --muted: #8c7f6f;       /* secondary text */
   --card: #ffffff;        /* raised surfaces: sheets, tab bar, rows */
   --line: #e6dccc;        /* hairline borders */

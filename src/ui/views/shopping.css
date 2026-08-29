@@ -88,6 +88,18 @@
   justify-content: center;
 }
 .shop-check:active { background: var(--accent-soft); }
+/* The cart's two verbs, tinted subtly: green puts in, red takes out. Stroke
+   carries the meaning; the soft ground keeps it a whisper, not a warning. */
+.shop-check-add {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.shop-check-add:active { background: var(--ok-soft); filter: brightness(0.95); }
+.shop-check-remove {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.shop-check-remove:active { background: var(--danger-soft); filter: brightness(0.95); }
 
 /* Visible buy-amount stepper: the shared capsule one voice quieter than
    the cart button — the check-off stays THE gesture; this only corrects
@@ -148,24 +160,11 @@
 /* -- in-cart cards are dimmed confirmations -------------------------------- */
 .shop-cart-row { opacity: 0.55; }
 /* The done-mark sits where a To Buy card's cart button sits — same 52px
-   right column, same accent cart drawing (CartDoneIcon, the filled state),
+   right column, mirrored by the red cart-minus (Put back) in that same spot,
    so a row keeps its landmark when it moves to the cart. */
-.shop-cart-mark {
-  flex-shrink: 0;
-  align-self: center;
-  width: 52px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
 /* The quiet escape hatch aligns to the card's left text rhythm; negative
    margins give back most of the 44px target's slack so the dimmed card
    stays compact (the toast-undo trick). */
-.shop-putback {
-  padding: 0;
-  margin: calc(-1 * var(--s1)) 0 calc(-1 * var(--s2));
-}
 
 /* -- one-shot promote prompt (PLAN.md §1.6) -------------------------------- */
 .shop-prompt {
