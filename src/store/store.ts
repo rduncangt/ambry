@@ -36,7 +36,7 @@ import { planMerge } from "../domain/merge";
 import { pruneDoc } from "../domain/prune";
 import { buildExport as buildEnvelope } from "../domain/exportImport";
 import { planPackageResize, type UnitChangePlan } from "../domain/units";
-import { shoppingList } from "./selectors";
+import { resolveVocabValue, shoppingList, valuesInUse } from "./selectors";
 
 export const COALESCE_MS = 2000;
 export const SAVE_DEBOUNCE_MS = 100;
@@ -193,6 +193,31 @@ export interface Store {
   // -- merge (PLAN.md §2) --------------------------------------------------
   /** Loser -> tombstone with merged_into; survivor gains aliases/flag; `merge` event on survivor records resolvedQty. */
   mergeItems(survivorId: string, loserId: string, resolvedQty: number): void;
+
+  // -- history record ------------------------------------------------------
+  /**
+   * Record edit, not an observation: remove the named events from the log
+   * outright. Unknown ids are ignored (a call matching nothing is a no-op).
+   * Legal under R2 — events are self-contained and nothing references them,
+   * which is exactly what makes user-facing history deletion possible. ONE
+   * committed mutation; NO new event is written, and items (quantity,
+   * flags, verified_at) are untouched.
+   */
+  deleteEvent(ids: string[]): void;
+
+  // -- declared locations --------------------------------------------------
+  /**
+   * Declare a location so its (possibly empty) card exists before anything
+   * is filed there. Trims, resolves case-insensitively against locations
+   * already in use AND already declared (existing casing wins — the same
+   * resolveVocabValue guard every picker uses), appends to
+   * settings.declared_locations only when genuinely new, and returns the
+   * resolved casing ("" for blank input, with nothing committed).
+   */
+  addLocation(name: string): string;
+  /** Un-declare a location (case-insensitive). Items are never touched — a
+   *  shelf that still holds items simply keeps its derived card. */
+  removeLocation(name: string): void;
 
   // -- shopping extras -----------------------------------------------------
   addExtra(text: string): ShoppingExtra;
@@ -761,6 +786,46 @@ export function createStore(
 
       // One merge event, on the survivor, note = loser's name.
       commitQuantity(survivor, resolvedQty, "merge", { note: loser.name });
+    },
+
+    // -- history record ------------------------------------------------------
+    deleteEvent(ids) {
+      const remove = new Set(ids);
+      const kept = doc.events.filter((e) => !remove.has(e.id));
+      // Nothing matched: return without a commit — a phantom mutation would
+      // bump writes_since_export for a record that did not change.
+      if (kept.length === doc.events.length) return;
+      doc.events = kept;
+      // A record edit is not an observation: no event, no item field moves —
+      // current state lives on the item (R2), so the count, flags and
+      // verified_at all stand exactly as they were.
+      committed();
+    },
+
+    // -- declared locations --------------------------------------------------
+    addLocation(name) {
+      // Resolve against BOTH vocabularies: shelves items already use and
+      // shelves declared earlier — iOS auto-capitalization must not mint
+      // "Garage" beside "garage" through this door either.
+      const known = [...valuesInUse(doc, "location"), ...doc.settings.declared_locations];
+      const resolved = resolveVocabValue(known, name);
+      if (resolved === "") return "";
+      const exists = known.some((v) => v.toLowerCase() === resolved.toLowerCase());
+      if (!exists) {
+        doc.settings.declared_locations.push(resolved);
+        committed();
+      }
+      // Already known (in use or declared): nothing to store, but the caller
+      // still gets the canonical casing to open.
+      return resolved;
+    },
+
+    removeLocation(name) {
+      const key = name.trim().toLowerCase();
+      const kept = doc.settings.declared_locations.filter((v) => v.toLowerCase() !== key);
+      if (kept.length === doc.settings.declared_locations.length) return;
+      doc.settings.declared_locations = kept;
+      committed();
     },
 
     // -- shopping extras ----------------------------------------------------

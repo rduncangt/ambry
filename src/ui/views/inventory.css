@@ -87,6 +87,23 @@
 .loc-card-low { color: var(--danger); }
 .loc-card-chevron { flex-shrink: 0; color: var(--muted); font-size: 20px; }
 
+/* Quiet doors for declared locations: "＋ Add location" under the cards and
+   "Remove this location" on an empty declared shelf. Muted text buttons —
+   findable when looked for, silent otherwise. */
+.loc-add,
+.loc-remove {
+  background: none;
+  border: none;
+  min-height: var(--tap);
+  padding: 0 var(--s1);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+.loc-add { margin-top: var(--s2); }
+.loc-remove { margin-top: var(--s3); }
+
 /* Divider between the counted shelf and the seeded-but-never-counted pile:
    a quiet toggle, collapsed by default so a hundred "?" rows can never bury
    the handful of real counts. */

@@ -350,6 +350,33 @@ describe("locationSummaries", () => {
     expect(locationSummaries(makeDoc())).toEqual([]);
     expect(locationSummaries(makeDoc({ items: [makeItem({ deleted_at: NOW })] }))).toEqual([]);
   });
+
+  it("unions declared locations as zero-count rows in the same ordering scheme", () => {
+    const doc = makeDoc({ items: [makeItem({ location: "cellar" })] });
+    doc.settings.declared_locations = ["garage", "Freezer"];
+    expect(locationSummaries(doc)).toEqual([
+      // A declared physical shelf still ranks in walking order…
+      { location: "Freezer", total: 0, counted: 0, low: 0, flagged: 0, uncounted: 0 },
+      // …and declared/derived non-physical shelves interleave alphabetically.
+      { location: "cellar", total: 1, counted: 1, low: 0, flagged: 0, uncounted: 0 },
+      { location: "garage", total: 0, counted: 0, low: 0, flagged: 0, uncounted: 0 },
+    ]);
+  });
+
+  it("never doubles a declared shelf items already use (case-insensitive union)", () => {
+    const doc = makeDoc({ items: [makeItem({ location: "fridge" })] });
+    doc.settings.declared_locations = ["Fridge"];
+    expect(locationSummaries(doc).map((s) => s.location)).toEqual(["fridge"]);
+  });
+
+  it("declared-only docs show cards — an empty shelf can exist now", () => {
+    const doc = makeDoc();
+    // A hand-edited double survives the union exactly once.
+    doc.settings.declared_locations = ["Garage", "garage"];
+    expect(locationSummaries(doc)).toEqual([
+      { location: "Garage", total: 0, counted: 0, low: 0, flagged: 0, uncounted: 0 },
+    ]);
+  });
 });
 
 describe("itemsInLocation", () => {
