@@ -72,7 +72,6 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   // back for 1 more) must not duplicate the row. Flagged items are excluded:
   // unpurchase re-raises the flag, so a put-back row moves (whole, not
   // duplicated) back to the To Buy section above.
-  const seen = new Set<string>();
   // Reversal-aware: per item, the LATEST of today's {purchase, "put back"
   // reversal recount} decides. Without this, a reversed check-off resurfaces
   // as "in the cart" the moment its re-raised flag is later cleared — a dim
@@ -92,7 +91,7 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
     const item = liveById.get(e.item_id);
     if (item !== undefined && !item.flagged) inCart.push(item);
   }
-  inCart.reverse(); // newest-first scan; restore first-purchase order
+  inCart.reverse(); // newest-first scan flipped: rows order by each item's LATEST purchase, oldest of those first
 
   return { toBuy, extras, inCart };
 }
@@ -133,14 +132,11 @@ export function groupByCategory(items: Item[]): CategoryGroup[] {
   });
 }
 
-/**
- * Seeded-but-never-counted: a zero no human ever observed (the "?" badge
- * rule). NOT "out" — absence was never verified, so it must never read as a
- * shortage or bury the rows that carry real counts.
- */
-export function isUncounted(item: Item): boolean {
-  return item.quantity === 0 && item.verified_at === null;
-}
+// Canonical definition moved to src/domain/format.ts (fmtLevel needs it and
+// domain must not import the store layer); re-exported here so UI call sites
+// keep their one accustomed import path.
+export { isUncounted } from "../domain/format";
+import { isUncounted } from "../domain/format";
 
 /**
  * Genuinely low: a live, counted item at or under its threshold. Uncounted
@@ -278,6 +274,31 @@ export function stalest(doc: AmbryDoc, location?: string): Item[] {
     )
     // null verified_at = never confirmed by a human — stalest of all, first.
     .sort((a, b) => isoAsc(a.verified_at, b.verified_at));
+}
+
+/**
+ * A count confirmed within this many days is trusted: reconcile stops asking
+ * about it. This is the FLOOR under the micro-audit — without it, a "stalest
+ * 10" always produces ten rows even in a freshly counted pantry, and
+ * confirming items checked 47 minutes ago is mindless clicking that trains
+ * the ✓ into a reflex. STALE_DAYS (30) stays the "stale" messaging threshold;
+ * FRESH_DAYS is the younger bound below which nothing needs a check at all.
+ */
+export const FRESH_DAYS = 7;
+
+/**
+ * Live items NOT confirmed within FRESH_DAYS of nowIso — the reconcile
+ * micro-audit's worklist. Same observation clock as staleCount:
+ * verified_at with a created_at fallback, so a freshly seeded item is
+ * trusted for its first week and ages INTO the check instead of demanding
+ * one on day zero. Boundary matches staleCount's: exactly FRESH_DAYS old is
+ * still fresh (strictly more than). Stalest first via the existing ordering.
+ */
+export function needsCheck(doc: AmbryDoc, nowIso: string, location?: string): Item[] {
+  const freshAfter = Date.parse(nowIso) - FRESH_DAYS * DAY_MS;
+  return stalest(doc, location).filter(
+    (i) => Date.parse(i.verified_at ?? i.created_at) < freshAfter,
+  );
 }
 
 export type ExportNagLevel = "none" | "badge" | "banner";

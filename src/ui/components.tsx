@@ -421,6 +421,36 @@ export function QtyControl(props: {
 }
 
 // ---------------------------------------------------------------------------
+// TrashIcon — remove-from-list glyph
+// ---------------------------------------------------------------------------
+
+/** Stroke-style trash-can glyph (currentColor, ~20px — same weight family as
+ *  InventoryView's CartIcon). On a list row a trash can unambiguously means
+ *  "off this list"; callers wrap it in a 44px hit box and give the button
+ *  its aria-label. */
+export function TrashIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3.5 6h17" />
+      <path d="M8.5 6V4.5A1.5 1.5 0 0 1 10 3h4a1.5 1.5 0 0 1 1.5 1.5V6" />
+      <path d="M18.5 6l-.9 13.1a1.5 1.5 0 0 1-1.5 1.4H7.9a1.5 1.5 0 0 1-1.5-1.4L5.5 6" />
+      <path d="M10 10.5v6" />
+      <path d="M14 10.5v6" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Banner — install / export / update notices
 // ---------------------------------------------------------------------------
 

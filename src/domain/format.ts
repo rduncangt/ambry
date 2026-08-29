@@ -95,12 +95,25 @@ export function fmtQtyBoth(item: Item): string {
 }
 
 /**
+ * Seeded-but-never-counted: a zero no human ever observed (the "?" rule).
+ * NOT "out" — absence was never verified, so it must never read as a
+ * shortage. Canonical definition lives here in the domain so fmtLevel can
+ * honor it; src/store/selectors.ts re-exports it for the UI layer.
+ */
+export function isUncounted(item: Item): boolean {
+  return item.quantity === 0 && item.verified_at === null;
+}
+
+/**
  * THE rule for "an item's level as text": ladder items render their rung
  * label ("Half", "Full +2"), numeric items render both sides ("0.4 bags
- * (400 g)"). One function so list rows, detail views, and pickers can never
- * disagree about how a level reads.
+ * (400 g)"), and a zero no human ever observed reads "?" in BOTH modes —
+ * every other surface (stepper value, ladder chip, location cards) already
+ * refuses to call an unverified zero a shortage, and this function exists
+ * precisely so no screen can disagree.
  */
 export function fmtLevel(item: Item): string {
+  if (isUncounted(item)) return "?";
   if (item.display_mode === "ladder") {
     return ladderLabel(item.quantity, readRung(item.quantity));
   }

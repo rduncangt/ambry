@@ -1511,3 +1511,26 @@ describe("unpurchase composes with intervening writes", () => {
     expect(b?.eventId).toBe(a?.eventId); // same event, updated in place
   });
 });
+
+describe("unpurchase reports what it did", () => {
+  it("returns false and mutates nothing when the only purchase was before local midnight", () => {
+    const { store, clock } = fresh();
+    const item = store.createItem({ name: "OJ", quantity: 0 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1);
+    const qty = item.quantity;
+    clock.advance(36 * 60 * 60 * 1000); // stale tab: a day and a half later
+    expect(store.unpurchase(item.id)).toBe(false);
+    expect(item.quantity).toBe(qty);
+    expect(item.flagged).toBe(false);
+  });
+
+  it("returns true when a same-day purchase was reversed", () => {
+    const { store } = fresh();
+    const item = store.createItem({ name: "Salsa", quantity: 0 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1);
+    expect(store.unpurchase(item.id)).toBe(true);
+    expect(item.flagged).toBe(true);
+  });
+});
