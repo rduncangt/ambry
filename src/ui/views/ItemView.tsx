@@ -981,12 +981,13 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
               class="btn"
               onClick={() => {
                 // Manual clear for flags that will never end in a purchase
-                // (PLAN.md §1.2 fix 4).
+                // (PLAN.md §1.2 fix 4). Action language: the button removes
+                // the item from the list, it does not assert stock state.
                 store.clearFlag(item.id);
-                toast(`${item.name}: flag cleared`);
+                toast(`${item.name}: removed from shopping list`);
               }}
             >
-              Have plenty
+              Remove from shopping list
             </button>
           </div>
         ) : (
@@ -1021,9 +1022,12 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
                 </button>
               ))}
             </div>
-            {item.threshold !== null && (
+            {activeThresholdRung !== null && (
+              // Rung phrasing of the same rule the number mode states: a
+              // write landing at/below the threshold (dropping, or the first
+              // count) flags.
               <p class="muted item-hint">
-                Flags when a tap or count lands at {fmtQty(item.threshold)} or below.
+                Flags when a count lands at {RUNG_LABELS[activeThresholdRung]} or below.
               </p>
             )}
           </div>
@@ -1051,7 +1055,7 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
             <p class="muted item-hint">
               {item.threshold === null
                 ? "Blank = never flags itself; you can still flag by hand."
-                : `Flags when the quantity crosses down to ${fmtQtyUnit(item.threshold, item.unit)} or below.`}
+                : `Flags when a count lands at ${fmtQtyUnit(item.threshold, item.unit)} or below.`}
             </p>
           </div>
         )}
