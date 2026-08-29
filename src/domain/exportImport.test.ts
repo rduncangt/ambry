@@ -71,6 +71,7 @@ function makeDoc(over: Partial<AmbryDoc> = {}): AmbryDoc {
       retention_days: 365,
       last_export_at: null,
       writes_since_export: 3,
+      last_trip_ended_at: null,
       device_label: "kc-iphone",
     },
     ...over,
