@@ -78,26 +78,48 @@
   accent-color: var(--accent);
 }
 
-/* Compact history rows. */
+/* History: day-grouped sentence rows. Each row is a BUTTON (tap offers to
+   remove the entry from the record), so it carries the 44px tap floor. */
+.item-day { display: flex; flex-direction: column; }
+.item-day-head {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 var(--s1);
+}
 .item-history { list-style: none; margin: 0; padding: 0; }
 .item-event {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: var(--s2);
-  min-height: 36px;
+  min-height: var(--tap);
   padding: var(--s1) 0;
+  border: none;
   border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+  color: var(--ink);
   font-size: 14px;
 }
-.item-event-glyph { width: 24px; text-align: center; flex-shrink: 0; }
-.item-event-qty {
+.item-event:active { background: var(--accent-soft); }
+/* Reversal pairs and orphaned put-backs: quiet — bookkeeping, not stock news. */
+.item-event-muted .item-event-label { color: var(--muted); }
+.item-event-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.item-event-label,
+.item-event-sub {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.item-event-sub { font-size: 12px; }
 .item-event-age { flex-shrink: 0; font-size: 13px; }
 
 /* Unit-change conversion preview. */

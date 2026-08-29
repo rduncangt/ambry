@@ -94,16 +94,44 @@ export function migrateDoc(raw: unknown): AmbryDoc {
   // through, anything else (missing, junk) becomes null.
   const tripRaw = settings.last_trip_ended_at;
   const trip = typeof tripRaw === "string" && !Number.isNaN(Date.parse(tripRaw)) ? tripRaw : null;
+  // Declared locations (empty-shelf cards): an array of non-blank strings,
+  // trimmed, case-insensitively deduped keeping the first casing; anything
+  // else (missing, junk, non-string entries) falls back to []. Fallbacks,
+  // not errors — same rule as the numerics above.
+  const declaredRaw = settings.declared_locations;
+  const declared: string[] = [];
+  if (Array.isArray(declaredRaw)) {
+    const seen = new Set<string>();
+    for (const entry of declaredRaw) {
+      if (typeof entry !== "string") continue;
+      const t = entry.trim();
+      const key = t.toLowerCase();
+      if (t === "" || seen.has(key)) continue;
+      seen.add(key);
+      declared.push(t);
+    }
+  }
+  const declaredClean =
+    Array.isArray(declaredRaw) &&
+    declaredRaw.length === declared.length &&
+    declared.every((v, i) => declaredRaw[i] === v);
   if (
     settings.retention_days !== retention ||
     settings.writes_since_export !== writes ||
-    settings.last_trip_ended_at !== trip
+    settings.last_trip_ended_at !== trip ||
+    !declaredClean
   ) {
     // Copy, don't mutate: migrateDoc is pure, and when no migration ran
     // `doc` is still the caller's own object.
     doc = {
       ...doc,
-      settings: { ...settings, retention_days: retention, writes_since_export: writes, last_trip_ended_at: trip },
+      settings: {
+        ...settings,
+        retention_days: retention,
+        writes_since_export: writes,
+        last_trip_ended_at: trip,
+        declared_locations: declared,
+      },
     };
   }
   return doc as unknown as AmbryDoc;

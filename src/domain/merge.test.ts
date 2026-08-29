@@ -55,6 +55,7 @@ function makeDoc(items: Item[], events: HistoryEvent[]): AmbryDoc {
       last_export_at: null,
       writes_since_export: 0,
       last_trip_ended_at: null,
+      declared_locations: [],
       device_label: "test",
     },
   };

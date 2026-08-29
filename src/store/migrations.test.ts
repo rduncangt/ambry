@@ -14,6 +14,7 @@ function validRaw(over: Record<string, unknown> = {}): Record<string, unknown> {
       last_export_at: null,
       writes_since_export: 0,
       last_trip_ended_at: null,
+      declared_locations: [],
       device_label: "phone",
     },
     ...over,
@@ -167,6 +168,59 @@ describe("migrateDoc — settings numeric coercion", () => {
     const before = JSON.stringify(raw);
     const doc = migrateDoc(raw);
     expect(doc.settings.retention_days).toBe(DEFAULT_RETENTION_DAYS);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+describe("migrateDoc — declared_locations coercion", () => {
+  function withSettings(patch: (settings: Record<string, unknown>) => void): Record<string, unknown> {
+    const raw = validRaw();
+    patch(raw.settings as Record<string, unknown>);
+    return raw;
+  }
+
+  it("fills [] when an older backup predates declared_locations", () => {
+    const raw = withSettings((s) => delete s.declared_locations);
+    expect(migrateDoc(raw).settings.declared_locations).toEqual([]);
+  });
+
+  const junkCases: Array<[string, unknown]> = [
+    ["a string", "garage"],
+    ["an object", { 0: "garage" }],
+    ["a number", 3],
+    ["null", null],
+  ];
+  it.each(junkCases)("coerces declared_locations=%s to []", (_label, v) => {
+    const raw = withSettings((s) => (s.declared_locations = v));
+    expect(migrateDoc(raw).settings.declared_locations).toEqual([]);
+  });
+
+  it("trims entries and drops blanks and non-strings", () => {
+    const raw = withSettings(
+      (s) => (s.declared_locations = ["  Garage ", "", "   ", 7, null, "cellar"]),
+    );
+    expect(migrateDoc(raw).settings.declared_locations).toEqual(["Garage", "cellar"]);
+  });
+
+  it("dedupes case-insensitively keeping the first casing", () => {
+    const raw = withSettings(
+      (s) => (s.declared_locations = ["Garage", "garage", "GARAGE", "attic"]),
+    );
+    expect(migrateDoc(raw).settings.declared_locations).toEqual(["Garage", "attic"]);
+  });
+
+  it("passes a clean list through untouched (same reference doc)", () => {
+    const raw = withSettings((s) => (s.declared_locations = ["Garage", "cellar"]));
+    const doc = migrateDoc(raw);
+    expect(doc).toBe(raw);
+    expect(doc.settings.declared_locations).toEqual(["Garage", "cellar"]);
+  });
+
+  it("coercion copies rather than mutating the input document", () => {
+    const raw = withSettings((s) => (s.declared_locations = ["Garage", "garage"]));
+    const before = JSON.stringify(raw);
+    const doc = migrateDoc(raw);
+    expect(doc.settings.declared_locations).toEqual(["Garage"]);
     expect(JSON.stringify(raw)).toBe(before);
   });
 });

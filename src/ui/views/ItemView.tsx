@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { RUNG_LABELS, fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, parseDec } from "../../domain/format";
+import { buildHistoryRows, type HistoryRow } from "../../domain/history";
 import { rungValue } from "../../domain/ladder";
 import { historyFor, planMerge } from "../../domain/merge";
 import { duplicateCandidates, searchItems } from "../../domain/search";
@@ -19,8 +20,6 @@ import {
   SEED_LOCATIONS,
   now,
   type AmbryDoc,
-  type EventKind,
-  type HistoryEvent,
   type Item,
   type LadderRung,
 } from "../../types";
@@ -185,68 +184,86 @@ function PickerRow(props: {
 // History
 // ---------------------------------------------------------------------------
 
-const KIND_GLYPH: Record<EventKind, string> = {
-  create: "✚",
-  add: "＋",
-  use: "−",
-  recount: "＝",
-  purchase: "🛒",
-  unit_change: "⇄",
-  merge: "⇥",
-  delete: "🗑",
-  restore: "↩",
-  import: "⇪",
-};
-
-const KIND_LABEL: Record<EventKind, string> = {
-  create: "created",
-  add: "added",
-  use: "used",
-  recount: "recount",
-  purchase: "bought",
-  unit_change: "unit change",
-  merge: "merged",
-  delete: "deleted",
-  restore: "restored",
-  import: "imported",
-};
-
-/** "2 bags → 400 g" — unit_change events show qty_before in unit_before. */
-function eventQtyText(e: HistoryEvent): string {
-  const before =
-    e.unit_before !== undefined ? fmtQtyUnit(e.qty_before, e.unit_before) : fmtQty(e.qty_before);
-  return `${before} → ${fmtQtyUnit(e.qty_after, e.unit)}`;
-}
-
 const HISTORY_LIMIT = 20;
 
+/** "Today" / "Yesterday" / a local date — day headers group by the LOCAL
+ *  calendar day of the row's timestamp (the shopper's midnight, not UTC's). */
+function dayLabel(at: string, nowIso: string): string {
+  const day = (d: Date): number => d.getFullYear() * 10_000 + d.getMonth() * 100 + d.getDate();
+  const rowDay = new Date(at);
+  const today = new Date(nowIso);
+  if (day(rowDay) === day(today)) return "Today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (day(rowDay) === day(yesterday)) return "Yesterday";
+  return rowDay.toLocaleDateString();
+}
+
 function HistorySection(props: { doc: AmbryDoc; itemId: string; nowIso: string }) {
+  const store = useStore();
+  const [showAll, setShowAll] = useState(false);
   // Union over the merged_into chain — loser events reach the survivor's
-  // view without ever being rewritten (domain/merge.historyFor).
-  const events = historyFor(props.doc, props.itemId);
+  // view without ever being rewritten (domain/merge.historyFor) — then the
+  // presenter turns the log into sentences (and folds put-back reversals
+  // into their purchases).
+  const rows = buildHistoryRows(historyFor(props.doc, props.itemId), props.nowIso);
+  const visible = showAll ? rows : rows.slice(0, HISTORY_LIMIT);
+
+  const remove = (row: HistoryRow): void => {
+    // A record edit under R2: events are self-contained observations, so
+    // removing one never moves the current count. Say so at the moment of
+    // truth.
+    const ok = window.confirm(
+      "Remove this history entry? It edits the record only — the current count stays as it is.",
+    );
+    if (ok) store.deleteEvent(row.ids);
+  };
+
+  // Rows arrive newest-first, so local calendar days form contiguous runs.
+  const groups: { day: string; rows: HistoryRow[] }[] = [];
+  for (const row of visible) {
+    const day = dayLabel(row.at, props.nowIso);
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.day === day) last.rows.push(row);
+    else groups.push({ day, rows: [row] });
+  }
+
   return (
     <section class="item-section">
       <h2 class="item-section-title">History</h2>
-      {events.length === 0 ? (
+      {rows.length === 0 ? (
         <p class="muted">No recorded changes.</p>
       ) : (
-        <ul class="item-history">
-          {events.slice(0, HISTORY_LIMIT).map((e) => (
-            <li key={e.id} class="item-event">
-              <span class="item-event-glyph" title={KIND_LABEL[e.kind]} aria-label={KIND_LABEL[e.kind]}>
-                {KIND_GLYPH[e.kind]}
-              </span>
-              <span class="item-event-qty">
-                {eventQtyText(e)}
-                {e.note !== undefined && <span class="muted"> · {e.note}</span>}
-              </span>
-              <span class="item-event-age muted">{fmtAge(e.at, props.nowIso)}</span>
-            </li>
-          ))}
-        </ul>
+        groups.map((g) => (
+          <div key={g.day} class="item-day">
+            <h3 class="item-day-head muted">{g.day}</h3>
+            <ul class="item-history">
+              {g.rows.map((row) => (
+                <li key={row.ids.join("+")}>
+                  <button
+                    type="button"
+                    class={`item-event${row.muted ? " item-event-muted" : ""}`}
+                    onClick={() => remove(row)}
+                  >
+                    <span class="item-event-text">
+                      <span class="item-event-label">{row.label}</span>
+                      {row.sub !== null && <span class="item-event-sub muted">{row.sub}</span>}
+                    </span>
+                    <span class="item-event-age muted">{fmtAge(row.at, props.nowIso)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
-      {events.length > HISTORY_LIMIT && (
-        <p class="muted item-hint">Showing the {HISTORY_LIMIT} most recent.</p>
+      {!showAll && rows.length > HISTORY_LIMIT && (
+        <button type="button" class="btn" onClick={() => setShowAll(true)}>
+          Show all {rows.length}
+        </button>
+      )}
+      {rows.length > 0 && (
+        <p class="muted item-hint">Tap an entry to remove it from the record.</p>
       )}
     </section>
   );
@@ -940,7 +957,7 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
         <PickerRow
           label="Location"
           value={item.location}
-          options={[...SEED_LOCATIONS, ...valuesInUse(doc, "location")]}
+          options={[...SEED_LOCATIONS, ...valuesInUse(doc, "location"), ...doc.settings.declared_locations]}
           onPick={(v) => store.editItem(item.id, { location: v })}
         />
         <PickerRow
@@ -1254,7 +1271,9 @@ export function CreateSheet() {
 
   const locationOptions = (() => {
     const seen = new Set<string>();
-    return [...SEED_LOCATIONS, ...valuesInUse(doc, "location")].filter((o) => {
+    // Declared-but-empty shelves must be pickable here too, or "set up the
+    // garage freezer first" dead-ends the moment you leave its card.
+    return [...SEED_LOCATIONS, ...valuesInUse(doc, "location"), ...doc.settings.declared_locations].filter((o) => {
       const k = o.toLowerCase();
       if (seen.has(k)) return false;
       seen.add(k);

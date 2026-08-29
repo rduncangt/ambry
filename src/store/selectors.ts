@@ -4,6 +4,7 @@
  * derived from today's purchase events, so mid-trip state survives page kills
  * for free.
  */
+import { sortEventsNewestFirst } from "../domain/history";
 import { historyFor } from "../domain/merge";
 import type { AmbryDoc, Item, ShoppingExtra, HistoryEvent } from "../types";
 import { EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
@@ -178,6 +179,10 @@ export interface LocationSummary {
  * pantry → fridge → freezer → countertop sequence first (when present,
  * matched case-insensitively so an "iOS-capitalized" seed still ranks),
  * remaining locations alphabetically, the null-location bucket last.
+ * Declared-but-empty locations (settings.declared_locations) join as
+ * zero-count rows — the "set up the garage freezer before filling it" card —
+ * unioned case-insensitively so a declared "Fridge" never doubles a derived
+ * "fridge".
  */
 export function locationSummaries(doc: AmbryDoc): LocationSummary[] {
   const rows = new Map<string | null, LocationSummary>();
@@ -193,6 +198,14 @@ export function locationSummaries(doc: AmbryDoc): LocationSummary[] {
     else row.counted++;
     if (isLow(item)) row.low++;
     if (item.flagged) row.flagged++;
+  }
+  const derived = new Set(
+    [...rows.keys()].map((loc) => (loc === null ? null : loc.toLowerCase())),
+  );
+  for (const name of doc.settings.declared_locations) {
+    if (derived.has(name.toLowerCase())) continue;
+    derived.add(name.toLowerCase());
+    rows.set(name, { location: name, total: 0, counted: 0, low: 0, flagged: 0, uncounted: 0 });
   }
   const rank = (loc: string | null): number => {
     // The un-filed pile belongs after every named shelf.
@@ -338,19 +351,23 @@ export function purchaseRhythm(doc: AmbryDoc, itemId: string, nowIso: string): P
   // exact). A mistap + undo otherwise reads "Bought once · just now" and
   // repeated mistaps drag the average toward zero.
   const purchases: HistoryEvent[] = [];
-  let pendingReversals = 0;
+  // Per ITEM, not one shared counter: merged histories interleave two items'
+  // events, and a loser's put-back must never cancel the survivor's
+  // purchase (the history view's pairing is item-aware; endpoints here must
+  // agree with it).
+  const pending = new Map<string, number>();
   // historyFor's stable sort keeps DOCUMENT order for same-timestamp ties,
   // which puts a purchase before the reversal that undid it when both landed
-  // in the same millisecond; break ties by document position (later append =
-  // newer) so cancellation pairs correctly.
-  const docIndex = new Map(doc.events.map((e, i) => [e.id, i]));
-  const newestFirst = [...historyFor(doc, itemId)].sort((a, b) =>
-    a.at === b.at ? (docIndex.get(b.id) ?? 0) - (docIndex.get(a.id) ?? 0) : a.at < b.at ? 1 : -1,
-  );
+  // in the same millisecond; the shared helper (domain/history) breaks ties
+  // by append position (later = newer) so cancellation pairs correctly —
+  // the same rule the history presenter pairs its rows by.
+  const newestFirst = sortEventsNewestFirst(historyFor(doc, itemId));
   for (const e of newestFirst) {
-    if (e.kind === "recount" && e.note === "put back") pendingReversals++;
-    else if (e.kind === "purchase") {
-      if (pendingReversals > 0) pendingReversals--;
+    if (e.kind === "recount" && e.note === "put back") {
+      pending.set(e.item_id, (pending.get(e.item_id) ?? 0) + 1);
+    } else if (e.kind === "purchase") {
+      const owed = pending.get(e.item_id) ?? 0;
+      if (owed > 0) pending.set(e.item_id, owed - 1);
       else purchases.push(e);
     }
   }
