@@ -23,7 +23,7 @@ import {
   type Item,
   type LadderRung,
 } from "../../types";
-import { Banner, QtyControl, Sheet } from "../components";
+import { Banner, CartMarkIcon, QtyControl, Sheet } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./item.css";
 
@@ -124,9 +124,40 @@ function DecDraft(props: {
 }
 
 /**
+ * Chip options for a vocabulary picker: de-dupe case-insensitively keeping
+ * first-seen order (seeds before in-use values), then union in the currently
+ * selected value when absent. The union is the new-vocab fix: a value fresh
+ * from the New… prompt is in no list until an item carrying it saves, and a
+ * selection with no chip to light reads as "nothing happened".
+ */
+function chipOptions(options: string[], selected: string | null): string[] {
+  const seen = new Set<string>();
+  const out = options.filter((o) => {
+    const k = o.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (selected !== null && !seen.has(selected.toLowerCase())) out.push(selected);
+  return out;
+}
+
+/** Case-insensitive selection match for the active chip — the vocabulary
+ *  itself is case-insensitive (resolveVocabValue), so a stored "fridge" must
+ *  light a "Fridge" chip rather than leave the row looking unselected. */
+const sameVocab = (option: string, selected: string | null): boolean =>
+  selected !== null && option.toLowerCase() === selected.toLowerCase();
+
+/**
  * Category/location vocabulary picker (PLAN.md §5): pick from existing values
  * plus an explicit "add new" — never a bare text field, so "Fridge"/"fridge"
  * duplicate rot cannot start.
+ *
+ * Collapsed by default (the collapsed-ladder pattern — QtyControl's rung
+ * chip): on the item page the value is mostly being READ, and a full row of
+ * hot chips kept offering choices nobody asked for. ONE chip shows the
+ * current value; tapping it expands the full row in place, and choosing (or
+ * tapping anywhere outside) collapses back.
  */
 function PickerRow(props: {
   label: string;
@@ -134,48 +165,122 @@ function PickerRow(props: {
   options: string[];
   onPick: (v: string | null) => void;
 }) {
-  // De-dupe while keeping first-seen order (seeds before in-use values).
-  const seen = new Set<string>();
-  const options = props.options.filter((o) => {
-    const k = o.toLowerCase();
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Keyboard/VoiceOver: expanding unmounts the collapsed chip that held
+  // focus — move focus into the expanded row (and back on collapse), and
+  // let Escape close what pointerdown can't hear from a keyboard.
+  const activeChipRef = useRef<HTMLButtonElement>(null);
+  const collapsedRef = useRef<HTMLButtonElement>(null);
+  const everOpened = useRef(false);
+  useEffect(() => {
+    if (open) {
+      everOpened.current = true;
+      activeChipRef.current?.focus();
+    } else if (everOpened.current) {
+      // Only after a real collapse — never on mount, which would yank focus
+      // to the first picker every time the item page opens.
+      collapsedRef.current?.focus({ preventScroll: true });
+    }
+  }, [open]);
+
+  // Tapping anywhere outside collapses the expanded row — the same
+  // outside-pointerdown rule as QtyControl's expanded ladder: an abandoned
+  // expansion must not leave a chip row crowding the screen.
+  useEffect(() => {
+    if (!open) return;
+    const isInside = (t: EventTarget | null): boolean => {
+      const root = rootRef.current;
+      return root !== null && t instanceof Node && root.contains(t);
+    };
+    // Two-phase outside-close: a dead-area pointerdown dismisses instantly
+    // (nothing below can mis-fire), but a tap on any interactive control
+    // waits for the capture-phase click — collapsing on pointerdown would
+    // re-layout the page mid-gesture and the click would land on whatever
+    // shifted under the finger (the expiry date wheel, another picker...).
+    const onPointerDown = (e: PointerEvent): void => {
+      if (isInside(e.target)) return;
+      const interactive =
+        e.target instanceof Element && e.target.closest("button,input,textarea,select,label,a") !== null;
+      if (!interactive) setOpen(false);
+    };
+    const onClickCapture = (e: MouseEvent): void => {
+      if (!isInside(e.target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", onClickCapture, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("click", onClickCapture, true);
+    };
+  }, [open]);
+
+  const options = chipOptions(props.options, props.value);
+  const pick = (v: string | null): void => {
+    setOpen(false);
+    // Tapping the chip that is already lit is the natural "just close it"
+    // gesture: no write, no updated_at bump, and a case-variant re-tap must
+    // not silently rewrite the stored casing.
+    if (v === props.value || (v !== null && sameVocab(v, props.value))) return;
+    props.onPick(v);
+  };
   const addNew = (): void => {
     const raw = window.prompt(`New ${props.label.toLowerCase()}`);
+    // Cancelled: stay expanded — the existing chips remain pickable.
     if (raw === null) return;
     // Case-insensitive match reuses the EXISTING casing — iOS capitalizes
     // the first letter of prompt() text, which must not mint "Fridge"
     // beside "fridge".
     const v = resolveVocabValue(options, raw);
-    if (v !== "") props.onPick(v);
+    if (v !== "") pick(v);
   };
   return (
-    <div class="item-field">
+    <div class="item-field" ref={rootRef}>
       <div class="item-label">{props.label}</div>
-      <div class="chips">
-        <button
-          type="button"
-          class={`chip${props.value === null ? " chip-active" : ""}`}
-          onClick={() => props.onPick(null)}
+      {open ? (
+        <div
+          class="chips"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
         >
-          None
-        </button>
-        {options.map((o) => (
           <button
-            key={o}
             type="button"
-            class={`chip${o === props.value ? " chip-active" : ""}`}
-            onClick={() => props.onPick(o)}
+            ref={props.value === null ? activeChipRef : undefined}
+            class={`chip${props.value === null ? " chip-active" : ""}`}
+            onClick={() => pick(null)}
           >
-            {o}
+            None
           </button>
-        ))}
-        <button type="button" class="chip" onClick={addNew}>
-          ＋ New…
+          {options.map((o) => (
+            <button
+              key={o}
+              type="button"
+              ref={sameVocab(o, props.value) ? activeChipRef : undefined}
+              class={`chip${sameVocab(o, props.value) ? " chip-active" : ""}`}
+              onClick={() => pick(o)}
+            >
+              {o}
+            </button>
+          ))}
+          <button type="button" class="chip" onClick={addNew}>
+            ＋ New…
+          </button>
+        </div>
+      ) : (
+        <button
+          ref={collapsedRef}
+          // Collapsed voice borrowed from the ladder (.qty-rung's grammar):
+          // outline + accent = a control holding a value; dashed muted =
+          // the "none" placeholder. Filled .chip-active stays the expanded
+          // row's selected-value voice.
+          type="button"
+          class={`chip picker-current${props.value === null ? " picker-current-none" : ""}`}
+          onClick={() => setOpen(true)}
+        >
+          {props.value ?? "none"}
         </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -1009,7 +1114,7 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
         {item.flagged ? (
           <div class="item-inline">
             <span>
-              <span class="flag-dot" /> On the shopping list{" "}
+              <CartMarkIcon /> On the shopping list{" "}
               <span class="muted">({flaggedCaption})</span>
             </span>
             <button
@@ -1269,17 +1374,15 @@ export function CreateSheet() {
     nav.openItem(d.id);
   };
 
-  const locationOptions = (() => {
-    const seen = new Set<string>();
-    // Declared-but-empty shelves must be pickable here too, or "set up the
-    // garage freezer first" dead-ends the moment you leave its card.
-    return [...SEED_LOCATIONS, ...valuesInUse(doc, "location"), ...doc.settings.declared_locations].filter((o) => {
-      const k = o.toLowerCase();
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  })();
+  // Declared-but-empty shelves must be pickable here too, or "set up the
+  // garage freezer first" dead-ends the moment you leave its card. The
+  // chipOptions union also keeps a value fresh from the New… prompt visible
+  // and lit — it is in no list until this item saves.
+  const locationOptions = chipOptions(
+    [...SEED_LOCATIONS, ...valuesInUse(doc, "location"), ...doc.settings.declared_locations],
+    location,
+  );
+  const categoryOptions = chipOptions(valuesInUse(doc, "category"), category);
 
   const addNewValue = (label: string, existing: string[], set: (v: string) => void): void => {
     const raw = window.prompt(`New ${label}`);
@@ -1308,8 +1411,13 @@ export function CreateSheet() {
     }
     if (expiry !== "") input.expiry = expiry;
     const item = store.createItem(input);
+    // Success-only hook (CreateDefaults.onCreated): fires exactly once,
+    // after the store write — cancel/close paths never reach here. Grab it
+    // BEFORE closeCreate(), which clears createDefaults.
+    const onCreated = nav.createDefaults?.onCreated;
     nav.closeCreate();
     toast(`Added ${item.name}`);
+    onCreated?.();
   };
 
   return (
@@ -1395,6 +1503,10 @@ export function CreateSheet() {
           />
         </div>
 
+        {/* Deliberately EXPANDED, unlike ItemBody's collapsed PickerRows: at
+            creation time choosing a location/category IS the whole activity,
+            so collapsing here would only tax every create with an extra tap
+            to reach the same chips. */}
         <div class="item-field">
           <div class="item-label">Location</div>
           <div class="chips">
@@ -1402,9 +1514,9 @@ export function CreateSheet() {
               <button
                 key={o}
                 type="button"
-                class={`chip${o === location ? " chip-active" : ""}`}
+                class={`chip${sameVocab(o, location) ? " chip-active" : ""}`}
                 // Tap again to unselect — location stays optional.
-                onClick={() => setLocation(o === location ? null : o)}
+                onClick={() => setLocation(sameVocab(o, location) ? null : o)}
               >
                 {o}
               </button>
@@ -1422,12 +1534,12 @@ export function CreateSheet() {
         <div class="item-field">
           <div class="item-label">Category</div>
           <div class="chips">
-            {valuesInUse(doc, "category").map((o) => (
+            {categoryOptions.map((o) => (
               <button
                 key={o}
                 type="button"
-                class={`chip${o === category ? " chip-active" : ""}`}
-                onClick={() => setCategory(o === category ? null : o)}
+                class={`chip${sameVocab(o, category) ? " chip-active" : ""}`}
+                onClick={() => setCategory(sameVocab(o, category) ? null : o)}
               >
                 {o}
               </button>
@@ -1435,7 +1547,7 @@ export function CreateSheet() {
             <button
               type="button"
               class="chip"
-              onClick={() => addNewValue("category", valuesInUse(doc, "category"), setCategory)}
+              onClick={() => addNewValue("category", categoryOptions, setCategory)}
             >
               ＋ New…
             </button>

@@ -257,7 +257,7 @@ body::after {
    rows, +8 gap +40 cart slot (44 − 4 overlap margin)):
 
    390pt phone, row 358px —
-   · attention row (caption + flag dot), widest value column: cluster 231
+   · attention row (caption + cart mark), widest value column: cluster 231
      → 88+8+231 = 327 ≤ 358, one line — every unit, every value
    · location row (no caption, no dot): cluster 214
      → 88+8+214 = 310 ≤ 358, one line
@@ -288,15 +288,16 @@ body::after {
 .row-sub { font-size: 14px; color: var(--muted); }
 
 /* -- markers ---------------------------------------------------------------
-   .flag-dot — flagged-for-shopping marker; .nobell — never_prompt marker
-   .muted — secondary-text utility. (The old Out/? badge pills are gone:
-   zero states live in the stepper value itself — see .stepper-out/-unknown.) */
-.flag-dot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent);
+   .cart-mark — flagged-for-shopping marker: the mini filled cart
+   (components.tsx CartMarkIcon), the same word the pantry rows' cart
+   toggle speaks; .nobell — never_prompt marker; .muted — secondary-text
+   utility. (The old Out/? badge pills are gone: zero states live in the
+   stepper value itself — see .stepper-out/-unknown.) */
+.cart-mark {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: -2px; /* optical baseline beside inline text (item page) */
+  color: var(--accent);
 }
 .nobell { opacity: 0.45; font-size: 14px; }
 .muted { color: var(--muted); }
