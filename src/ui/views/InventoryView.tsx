@@ -133,6 +133,7 @@ function splitByVisit(
 export function InventoryView() {
   const doc = useDoc();
   const nav = useNav();
+  const store = useStore();
   const [query, setQuery] = useState("");
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
@@ -178,6 +179,30 @@ export function InventoryView() {
     open !== null && openLive !== null ? splitByVisit(openLive, open) : null;
   const stale = staleCount(doc, nowIso);
 
+  // A declared location standing entirely empty may be un-declared from its
+  // own screen. The stored casing (not the typed one) is what removeLocation
+  // gets and the confirm names; the null "elsewhere" bucket and shelves that
+  // still derive from items never qualify.
+  const openLoc = open === null ? null : open.location;
+  const removableLocation =
+    openLoc !== null &&
+    openLive !== null &&
+    openLive.counted.length === 0 &&
+    openLive.uncounted.length === 0
+      ? (doc.settings.declared_locations.find(
+          (d) => d.toLowerCase() === openLoc.toLowerCase(),
+        ) ?? null)
+      : null;
+  const removeOpenLocation = (): void => {
+    if (removableLocation === null) return;
+    const ok = window.confirm(
+      `Remove “${removableLocation}”? It holds no items — only the empty shelf card goes away.`,
+    );
+    if (!ok) return;
+    store.removeLocation(removableLocation);
+    closeLocation();
+  };
+
   return (
     <section class="view inv-view">
       {/* Opaque sticky screen header: rows visibly disappear under it
@@ -219,13 +244,20 @@ export function InventoryView() {
       {searching ? (
         <SearchResults query={query} nowIso={nowIso} openLocation={open} />
       ) : openSplit !== null ? (
-        <LocationItems
-          split={openSplit}
-          nowIso={nowIso}
-          dueIds={open !== null ? open.dueIds : new Set()}
-          showUncounted={showUncounted}
-          onToggleUncounted={() => setShowUncounted(!showUncounted)}
-        />
+        <>
+          <LocationItems
+            split={openSplit}
+            nowIso={nowIso}
+            dueIds={open !== null ? open.dueIds : new Set()}
+            showUncounted={showUncounted}
+            onToggleUncounted={() => setShowUncounted(!showUncounted)}
+          />
+          {removableLocation !== null && (
+            <button class="loc-remove" type="button" onClick={removeOpenLocation}>
+              Remove this location
+            </button>
+          )}
+        </>
       ) : (
         <PantryHome onOpen={openLocation} />
       )}
@@ -252,7 +284,19 @@ export function InventoryView() {
  *  location cards keep their low/uncounted markers.) */
 function PantryHome(props: { onOpen: (location: string | null) => void }) {
   const doc = useDoc();
+  const store = useStore();
   const summaries = locationSummaries(doc);
+
+  // Declare a shelf before anything lives on it ("set up the garage freezer
+  // before filling it"). The store resolves casing against every known
+  // location, so typing "Fridge" opens the existing shelf instead of
+  // declaring a duplicate.
+  const addLocation = (): void => {
+    const raw = window.prompt("New location");
+    if (raw === null) return;
+    const resolved = store.addLocation(raw);
+    if (resolved !== "") props.onOpen(resolved);
+  };
 
   return (
     <div>
@@ -267,6 +311,9 @@ function PantryHome(props: { onOpen: (location: string | null) => void }) {
           ))}
         </ul>
       )}
+      <button class="loc-add" type="button" onClick={addLocation}>
+        ＋ Add location
+      </button>
     </div>
   );
 }
