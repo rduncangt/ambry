@@ -289,7 +289,7 @@ export function ReconcileView() {
 
     return (
       <section class="view">
-        <header class="recon-head">
+        <header class="sticky-head recon-head">
           <h1 class="view-title">{stage.label}</h1>
           <button
             class="recon-switch"
@@ -338,7 +338,9 @@ export function ReconcileView() {
 
     return (
       <section class="view">
-        <h1 class="view-title">Not seen</h1>
+        <header class="sticky-head">
+          <h1 class="view-title">Not seen</h1>
+        </header>
         <p class="recon-progress">
           {countText(rows.length)} never got a look this pass. Nothing changes
           automatically — decide per item.
@@ -496,7 +498,9 @@ export function ReconcileView() {
 
   return (
     <section class="view">
-      <h1 class="view-title">Reconcile</h1>
+      <header class="sticky-head">
+        <h1 class="view-title">Reconcile</h1>
+      </header>
       {live.length === 0 ? (
         <p class="muted">Nothing to walk yet — the pantry is empty.</p>
       ) : (

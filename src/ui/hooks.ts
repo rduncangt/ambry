@@ -138,11 +138,13 @@ const ToastCtx = createContext<ShowToast | null>(null);
 
 /**
  * Owns toast state AND renders the notice element (.toast in styles.css): a
- * slim tap-through line docked at the very top of the viewport — the bottom
- * toast parked itself exactly on the controls the user just tapped. The
- * container takes no pointer events (only the Undo button does), so it can
- * never block a control. A new toast replaces the current one — a burst of
- * writes shows only the latest, and its undo compensates only that write.
+ * compact tap-through pill docked top-right — the bottom toast parked
+ * itself exactly on the controls the user just tapped, and a full-width
+ * top strip covered the back link ("‹ Locations") for its 3 s, so the pill
+ * stays off the screen's left edge. The container takes no pointer events
+ * (only the Undo button does), so it can never block a control. A new
+ * toast replaces the current one — a burst of writes shows only the
+ * latest, and its undo compensates only that write.
  */
 export function ToastProvider(props: { children: ComponentChildren }) {
   const [active, setActive] = useState<ActiveToast | null>(null);

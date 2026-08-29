@@ -95,8 +95,8 @@ export function fmtQtyBoth(item: Item): string {
 }
 
 /**
- * Seeded-but-never-counted: a zero no human ever observed (the "?" rule).
- * NOT "out" — absence was never verified, so it must never read as a
+ * Seeded-but-never-counted: a zero no human ever observed (the quiet "–"
+ * rule). NOT "out" — absence was never verified, so it must never read as a
  * shortage. Canonical definition lives here in the domain so fmtLevel can
  * honor it; src/store/selectors.ts re-exports it for the UI layer.
  */
@@ -107,13 +107,15 @@ export function isUncounted(item: Item): boolean {
 /**
  * THE rule for "an item's level as text": ladder items render their rung
  * label ("Half", "Full +2"), numeric items render both sides ("0.4 bags
- * (400 g)"), and a zero no human ever observed reads "?" in BOTH modes —
- * every other surface (stepper value, ladder chip, location cards) already
- * refuses to call an unverified zero a shortage, and this function exists
- * precisely so no screen can disagree.
+ * (400 g)"), and a zero no human ever observed reads "–" (EN DASH) in BOTH
+ * modes — every other surface (stepper value, ladder chip, location cards)
+ * already refuses to call an unverified zero a shortage, and this function
+ * exists precisely so no screen can disagree. A dash, not a "?": a hundred
+ * seeded rows must read as "no value yet", not a hundred nagging questions
+ * (the semantic model is unchanged — only the glyph).
  */
 export function fmtLevel(item: Item): string {
-  if (isUncounted(item)) return "?";
+  if (isUncounted(item)) return "–";
   if (item.display_mode === "ladder") {
     return ladderLabel(item.quantity, readRung(item.quantity));
   }
