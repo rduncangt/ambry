@@ -7,7 +7,7 @@
  *
  * Three states, all under one sticky screen header and the same search bar:
  *   1. Default — one tappable card per location. A seeded catalog is mostly
- *      uncounted "?" rows; a flat list buries the handful of real counts, so
+ *      uncounted "–" rows; a flat list buries the handful of real counts, so
  *      the directory replaces it. (An earlier "Low & flagged" strip above
  *      the cards is gone: low items flag themselves now and the Shopping tab
  *      lists them — here it was noise.)
@@ -29,8 +29,10 @@ import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
 import {
+  FRESH_DAYS,
   STALE_DAYS,
   alpha,
+  isUncounted,
   itemsInLocation,
   locationSummaries,
   staleCount,
@@ -40,6 +42,8 @@ import { now, type Item } from "../../types";
 import { QtyControl } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./inventory.css";
+
+const DAY_MS = 86_400_000;
 
 /** " · "-joined non-empty caption parts, or null so the row-sub line is
  *  omitted entirely (no empty second line inflating row height). */
@@ -66,14 +70,24 @@ function countedOrderAtOpen(counted: Item[]): string[] {
   return [...flagged, ...rest].map((i) => i.id);
 }
 
-/** Both per-visit snapshots, taken together the moment the shelf opens. */
-function visitSnapshot(live: { counted: Item[]; uncounted: Item[] }): {
+/** Both per-visit snapshots, taken together the moment the shelf opens.
+ *  dueIds joins them: rows due a check at open KEEP their caption line for
+ *  the whole visit (it becomes "confirmed just now" after a fix) — the
+ *  caption vanishing would change row height and shift the list under the
+ *  finger, the exact hazard the order snapshot exists to prevent. */
+function visitSnapshot(
+  live: { counted: Item[]; uncounted: Item[] },
+  nowIso: string,
+): {
   countedOrder: string[];
   uncountedIds: Set<string>;
+  dueIds: Set<string>;
 } {
+  const all = [...live.counted, ...live.uncounted];
   return {
     countedOrder: countedOrderAtOpen(live.counted),
     uncountedIds: new Set(live.uncounted.map((i) => i.id)),
+    dueIds: new Set(all.filter((i) => checkAgeCaption(i, nowIso) !== null).map((i) => i.id)),
   };
 }
 
@@ -130,6 +144,7 @@ export function InventoryView() {
     location: string | null;
     countedOrder: string[];
     uncountedIds: Set<string>;
+    dueIds: Set<string>;
   } | null>(null);
   /** Uncounted pile revealed? Lives up here (not in LocationItems) so a
    *  search interlude does not reset it while the location stays open. */
@@ -142,7 +157,7 @@ export function InventoryView() {
 
   const openLocation = (location: string | null): void => {
     const split = itemsInLocation(doc, location);
-    setOpen({ location, ...visitSnapshot(split) });
+    setOpen({ location, ...visitSnapshot(split, now()) });
     // Collapsed on every fresh open — the divider is the reveal gesture —
     // UNLESS there is nothing counted to protect: an all-uncounted shelf
     // (the dominant state of a freshly seeded pantry) behind a collapsed
@@ -206,6 +221,8 @@ export function InventoryView() {
       ) : openSplit !== null ? (
         <LocationItems
           split={openSplit}
+          nowIso={nowIso}
+          dueIds={open !== null ? open.dueIds : new Set()}
           showUncounted={showUncounted}
           onToggleUncounted={() => setShowUncounted(!showUncounted)}
         />
@@ -282,10 +299,41 @@ function LocationCard(props: {
   );
 }
 
-/** Open location: counted rows (captionless — the shelf IS the context),
- *  then the uncounted pile behind its collapsed divider. */
+/** Location-row age microcaption: ONLY on rows due a check — the same
+ *  FRESH_DAYS boundary the reconcile worklist (needsCheck) uses, strictly
+ *  more than FRESH_DAYS since the last confirmation. Fresh rows stay
+ *  silent (no age noise), and never-counted rows return null too: they
+ *  already wear the dashed "–" value, so a caption would say it twice. */
+/** Caption for a row KNOWN to be due (snapshotted at open): skips the
+ *  freshness gate so a mid-visit confirm reads "confirmed just now"
+ *  instead of removing the line and jolting the layout. */
+function dueCaptionSticky(item: Item, nowIso: string): string {
+  return item.verified_at === null
+    ? `never confirmed · added ${fmtAge(item.created_at, nowIso)}`
+    : `confirmed ${fmtAge(item.verified_at, nowIso)}`;
+}
+
+function checkAgeCaption(item: Item, nowIso: string): string | null {
+  // Same clock as needsCheck: verified_at with a created_at fallback — an
+  // item created weeks ago and never confirmed IS due, and it is the most
+  // common state (createItem stamps no verification). Only isUncounted rows
+  // stay silent: their dashed "–" value already says everything.
+  if (isUncounted(item)) return null;
+  const freshAfter = Date.parse(nowIso) - FRESH_DAYS * DAY_MS;
+  const ref = item.verified_at ?? item.created_at;
+  if (Date.parse(ref) >= freshAfter) return null;
+  return item.verified_at === null
+    ? `never confirmed · added ${fmtAge(item.created_at, nowIso)}`
+    : `confirmed ${fmtAge(item.verified_at, nowIso)}`;
+}
+
+/** Open location: counted rows (no category caption — the shelf IS the
+ *  context; a quiet "confirmed 12d ago" appears only once a row is due a
+ *  check), then the uncounted pile behind its collapsed divider. */
 function LocationItems(props: {
   split: { counted: Item[]; uncounted: Item[] };
+  nowIso: string;
+  dueIds: Set<string>;
   showUncounted: boolean;
   onToggleUncounted: () => void;
 }) {
@@ -297,9 +345,13 @@ function LocationItems(props: {
   }
 
   return (
-    <ul class="inv-list">
+    <ul class="inv-list inv-loc-list">
       {counted.map((item) => (
-        <ItemRow key={item.id} item={item} caption={null} />
+        <ItemRow
+          key={item.id}
+          item={item}
+          caption={props.dueIds.has(item.id) ? dueCaptionSticky(item, props.nowIso) : null}
+        />
       ))}
       {uncounted.length > 0 && (
         <li class="row">
@@ -320,7 +372,15 @@ function LocationItems(props: {
         </li>
       )}
       {props.showUncounted &&
-        uncounted.map((item) => <ItemRow key={item.id} item={item} caption={null} />)}
+        uncounted.map((item) => (
+          // Never-counted (dashed) rows carry no caption; a row that was
+          // due at open keeps its caption slot for the visit.
+          <ItemRow
+            key={item.id}
+            item={item}
+            caption={props.dueIds.has(item.id) ? dueCaptionSticky(item, props.nowIso) : null}
+          />
+        ))}
     </ul>
   );
 }
@@ -434,7 +494,7 @@ function CartIcon(props: { filled: boolean }) {
 }
 
 /** One live item: name area opens the detail overlay; QtyControl answers and
- *  writes in place (and owns the 🔕 / Out–? value states / undo toast); the cart
+ *  writes in place (and owns the 🔕 / Out/– value states / undo toast); the cart
  *  target toggles the manual shopping flag AND carries the flag state (its
  *  filled/outline basket), so the row's flag-dot mark is suppressed —
  *  Shopping/Reconcile rows, which have no cart control, keep the dot. */

@@ -22,6 +22,7 @@ import {
   liveItems,
   locationSummaries,
   needsCheck,
+  purchaseRhythm,
   resolveVocabValue,
   shoppingList,
   staleCount,
@@ -617,6 +618,101 @@ describe("backupAgeDays", () => {
   });
 });
 
+describe("purchaseRhythm", () => {
+  it("zero purchases: count 0, no lastAt, no average", () => {
+    const item = makeItem();
+    const doc = makeDoc({
+      items: [item],
+      events: [makeEvent({ item_id: item.id, kind: "use", at: "2026-08-02T00:00:00.000Z" })],
+    });
+    expect(purchaseRhythm(doc, item.id, NOW)).toEqual({ count: 0, lastAt: null, avgDays: null });
+  });
+
+  it("one purchase: lastAt set, avgDays null (no gap exists yet)", () => {
+    const item = makeItem();
+    const at = "2026-08-10T09:00:00.000Z";
+    const doc = makeDoc({
+      items: [item],
+      events: [makeEvent({ item_id: item.id, kind: "purchase", at })],
+    });
+    expect(purchaseRhythm(doc, item.id, NOW)).toEqual({ count: 1, lastAt: at, avgDays: null });
+  });
+
+  it("several purchases: avgDays is the mean successive gap, lastAt the newest", () => {
+    // Purchases on Aug 1, 11, 15 (deliberately unsorted in the event log):
+    // gaps of 10 and 4 days -> mean 7.
+    const item = makeItem();
+    const doc = makeDoc({
+      items: [item],
+      events: [
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-15T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-01T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-11T00:00:00.000Z" }),
+      ],
+    });
+    const rhythm = purchaseRhythm(doc, item.id, NOW);
+    expect(rhythm.count).toBe(3);
+    expect(rhythm.lastAt).toBe("2026-08-15T00:00:00.000Z");
+    expect(rhythm.avgDays).toBe(7);
+  });
+
+  it("keeps fractional averages exact — rounding is the call site's job", () => {
+    // 36 hours apart -> 1.5 days.
+    const item = makeItem();
+    const doc = makeDoc({
+      items: [item],
+      events: [
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-01T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-02T12:00:00.000Z" }),
+      ],
+    });
+    expect(purchaseRhythm(doc, item.id, NOW).avgDays).toBe(1.5);
+  });
+
+  it("attributes a merged loser's purchases to the survivor (and none to the loser)", () => {
+    const survivor = makeItem();
+    const loser = makeItem({ merged_into: survivor.id, deleted_at: NOW });
+    const doc = makeDoc({
+      items: [survivor, loser],
+      events: [
+        // Loser events keep their original item_id (R2) and reach the
+        // survivor's rhythm through the merge chain only.
+        makeEvent({ item_id: loser.id, kind: "purchase", at: "2026-08-01T00:00:00.000Z" }),
+        makeEvent({ item_id: survivor.id, kind: "purchase", at: "2026-08-08T00:00:00.000Z" }),
+      ],
+    });
+    expect(purchaseRhythm(doc, survivor.id, NOW)).toEqual({
+      count: 2,
+      lastAt: "2026-08-08T00:00:00.000Z",
+      avgDays: 7,
+    });
+    expect(purchaseRhythm(doc, loser.id, NOW)).toEqual({
+      count: 0,
+      lastAt: null,
+      avgDays: null,
+    });
+  });
+
+  it("ignores every non-purchase kind", () => {
+    const item = makeItem();
+    const doc = makeDoc({
+      items: [item],
+      events: [
+        makeEvent({ item_id: item.id, kind: "add", at: "2026-08-01T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "recount", at: "2026-08-02T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "purchase", at: "2026-08-03T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "use", at: "2026-08-04T00:00:00.000Z" }),
+        makeEvent({ item_id: item.id, kind: "create", at: "2026-07-30T00:00:00.000Z" }),
+      ],
+    });
+    expect(purchaseRhythm(doc, item.id, NOW)).toEqual({
+      count: 1,
+      lastAt: "2026-08-03T00:00:00.000Z",
+      avgDays: null,
+    });
+  });
+});
+
 describe("inCart is reversal-aware", () => {
   it("a Put back followed by a later flag-clear does not resurface the item in the cart", () => {
     const adapter = memoryAdapter();
@@ -652,5 +748,35 @@ describe("inCart is reversal-aware", () => {
     store.purchase(item.id, 2); // bought: flag clears, quantity 2
     const list = shoppingList(store.getDoc(), new Date().toISOString());
     expect(list.inCart.map((i) => i.name)).toEqual(["Bread"]);
+  });
+});
+
+describe("purchaseRhythm ignores reversed check-offs", () => {
+  it("purchase + put-back counts zero", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter);
+    const item = store.createItem({ name: "Jam", quantity: 0 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1);
+    store.unpurchase(item.id);
+    const r = purchaseRhythm(store.getDoc(), item.id, new Date().toISOString());
+    expect(r.count).toBe(0);
+    expect(r.lastAt).toBeNull();
+  });
+
+  it("purchase, put-back, purchase counts one — the surviving purchase", () => {
+    const adapter = memoryAdapter();
+    const store = createStore(adapter);
+    const item = store.createItem({ name: "Tea", quantity: 0 });
+    store.flagManual(item.id);
+    store.purchase(item.id, 1);
+    store.unpurchase(item.id);
+    store.purchase(item.id, 2);
+    const doc = store.getDoc();
+    const r = purchaseRhythm(doc, item.id, new Date().toISOString());
+    expect(r.count).toBe(1);
+    const lastPurchase = [...doc.events].reverse().find((e) => e.kind === "purchase");
+    expect(r.lastAt).toBe(lastPurchase?.at ?? null);
+    expect(r.avgDays).toBeNull();
   });
 });
