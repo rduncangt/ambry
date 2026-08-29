@@ -12,7 +12,7 @@ export type ExportResult = "shared" | "downloaded" | "cancelled" | "failed";
 
 /**
  * Build the envelope and hand it to navigator.share when file-sharing is
- * supported; the anchor download is the fallback ONLY off iOS. recordExport()
+ * supported; the anchor download is the fallback only off iOS (Android's share sheet also gets a text/plain retry first — application/json is widely rejected there). recordExport()
  * runs ONLY on a completed share/download — an abandoned share sheet
  * (AbortError) must not silently reset the staleness nag, and a share
  * FAILURE must never claim success: on standalone iOS the <a download>
@@ -25,33 +25,52 @@ export async function exportFlow(store: Store): Promise<ExportResult> {
   // Pretty-printed (PLAN.md §2 Export): the backup doubles as a
   // human-inspectable archive.
   const json = JSON.stringify(envelope, null, 2);
-  const file = new File([json], exportFilename(new Date()), { type: "application/json" });
+  const name = exportFilename(new Date());
 
-  if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] }) === true) {
+  /** One share attempt; "cancelled" only for the user closing the sheet. */
+  const tryShare = async (file: File): Promise<ExportResult> => {
     try {
       await navigator.share({ files: [file] });
       store.recordExport();
       return "shared";
     } catch (e) {
-      // AbortError = the user closed the sheet: nothing left the device.
       if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
-      // Any other share failure: report it honestly. No anchor fallback here
-      // — when share IS supported but broke, silently rerouting to a
-      // download the user never asked for (and which may itself fail
-      // silently on iOS) hides the failure.
       return "failed";
     }
+  };
+
+  const jsonFile = new File([json], name, { type: "application/json" });
+  const canShareFiles = typeof navigator.share === "function" && typeof navigator.canShare === "function";
+
+  if (canShareFiles && navigator.canShare({ files: [jsonFile] })) {
+    const first = await tryShare(jsonFile);
+    if (first !== "failed") return first;
+    // iOS: a supported-but-broken share must stay an honest failure — the
+    // anchor path there can drop the download without any signal, and
+    // recording an export that may not exist disarms the staleness nag
+    // (PLAN.md §1.1). Android has no such treachery: fall through.
+    if (isIOS()) return "failed";
+    // Android share sheets widely reject application/json (NotAllowedError
+    // or an empty target list). Same bytes, same .json filename, text/plain
+    // MIME: most sheets accept it. One retry, then the download below.
+    const plainFile = new File([json], name, { type: "text/plain" });
+    if (navigator.canShare({ files: [plainFile] })) {
+      const second = await tryShare(plainFile);
+      if (second !== "failed") return second;
+    }
+  } else if (isIOS()) {
+    // File-sharing unsupported on iOS: the anchor path is not trustworthy
+    // (standalone Safari can drop the download silently) — refuse rather
+    // than record an export that may not exist.
+    return "failed";
   }
 
-  // File-sharing unsupported. On iOS the anchor path is not trustworthy
-  // (standalone Safari can drop the download without any signal), so refuse
-  // rather than record an export that may not exist.
-  if (isIOS()) return "failed";
-
-  const url = URL.createObjectURL(file);
+  // Everywhere else the download is dependable (Android: lands in
+  // Downloads; desktop: normal save).
+  const url = URL.createObjectURL(jsonFile);
   const a = document.createElement("a");
   a.href = url;
-  a.download = file.name;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
