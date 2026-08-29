@@ -11,6 +11,7 @@ import { memoryAdapter } from "./adapter";
 import { emptyDoc } from "./doc";
 import { createStore } from "./store";
 import {
+  FRESH_DAYS,
   STALE_DAYS,
   backupAgeDays,
   exportNag,
@@ -20,6 +21,7 @@ import {
   itemsInLocation,
   liveItems,
   locationSummaries,
+  needsCheck,
   resolveVocabValue,
   shoppingList,
   staleCount,
@@ -413,6 +415,64 @@ describe("stalest", () => {
     const doc = makeDoc({ items: [pantryOld, fridge, pantryNever, nowhere] });
     expect(stalest(doc, "pantry")).toEqual([pantryNever, pantryOld]);
     expect(stalest(doc)).toHaveLength(4);
+  });
+});
+
+describe("needsCheck", () => {
+  const iso = (msBeforeNow: number): string => new Date(Date.parse(NOW) - msBeforeNow).toISOString();
+
+  it("FRESH_DAYS is a floor under STALE_DAYS — the two thresholds stay distinct", () => {
+    expect(FRESH_DAYS).toBeLessThan(STALE_DAYS);
+  });
+
+  it("includes items last confirmed more than FRESH_DAYS ago; excludes fresh confirms", () => {
+    const overdue = makeItem({ verified_at: iso((FRESH_DAYS + 1) * DAY_MS) });
+    const justChecked = makeItem({ verified_at: iso(47 * 60_000) }); // 47 minutes ago
+    const doc = makeDoc({ items: [overdue, justChecked] });
+    expect(needsCheck(doc, NOW)).toEqual([overdue]);
+  });
+
+  it("a freshly counted pantry produces an EMPTY list, not a manufactured stalest-10", () => {
+    const items = Array.from({ length: 12 }, () => makeItem({ verified_at: iso(1 * DAY_MS) }));
+    expect(needsCheck(makeDoc({ items }), NOW)).toEqual([]);
+  });
+
+  it("boundary: confirmed exactly FRESH_DAYS ago is still fresh (strictly more than, matching staleCount)", () => {
+    const atBoundary = makeItem({ verified_at: iso(FRESH_DAYS * DAY_MS) });
+    const justOver = makeItem({ verified_at: iso(FRESH_DAYS * DAY_MS + 1) });
+    const doc = makeDoc({ items: [atBoundary, justOver] });
+    expect(needsCheck(doc, NOW)).toEqual([justOver]);
+  });
+
+  it("never-verified items fall back to created_at — a fresh seed is trusted for its first week", () => {
+    const seededToday = makeItem({ verified_at: null, created_at: iso(0) });
+    const seededLongAgo = makeItem({ verified_at: null, created_at: iso((FRESH_DAYS + 2) * DAY_MS) });
+    const doc = makeDoc({ items: [seededToday, seededLongAgo] });
+    expect(needsCheck(doc, NOW)).toEqual([seededLongAgo]);
+  });
+
+  it("verified_at wins over an old created_at (same clock as staleCount)", () => {
+    const doc = makeDoc({
+      items: [makeItem({ created_at: iso(100 * DAY_MS), verified_at: iso(1 * DAY_MS) })],
+    });
+    expect(needsCheck(doc, NOW)).toEqual([]);
+  });
+
+  it("orders stalest first: never-verified (old created_at) before dated verified_at ascending", () => {
+    const old = makeItem({ verified_at: iso(20 * DAY_MS) });
+    const older = makeItem({ verified_at: iso(25 * DAY_MS) });
+    const never = makeItem({ verified_at: null, created_at: iso(50 * DAY_MS) });
+    const doc = makeDoc({ items: [old, never, older] });
+    expect(needsCheck(doc, NOW)).toEqual([never, older, old]);
+  });
+
+  it("filters to one location when asked and ignores soft-deleted items", () => {
+    const pantry = makeItem({ location: "pantry", verified_at: iso(10 * DAY_MS) });
+    const fridge = makeItem({ location: "fridge", verified_at: iso(10 * DAY_MS) });
+    const deleted = makeItem({ location: "pantry", verified_at: iso(10 * DAY_MS), deleted_at: NOW });
+    const doc = makeDoc({ items: [pantry, fridge, deleted] });
+    expect(needsCheck(doc, NOW, "pantry")).toEqual([pantry]);
+    expect(needsCheck(doc, NOW)).toEqual([pantry, fridge]);
   });
 });
 

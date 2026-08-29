@@ -11,7 +11,14 @@
  */
 import { useState } from "preact/hooks";
 import { fmtAge, fmtLevel } from "../../domain/format";
-import { liveItems, resolveVocabValue, stalest, valuesInUse } from "../../store/selectors";
+import {
+  FRESH_DAYS,
+  liveItems,
+  needsCheck,
+  resolveVocabValue,
+  stalest,
+  valuesInUse,
+} from "../../store/selectors";
 import { now, type Item } from "../../types";
 import { QtyControl, Sheet } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
@@ -25,6 +32,12 @@ interface WalkStage {
   /** Snapshot of item ids in stalest order at walk start — the list must
    *  not resort mid-walk as verify() moves verified_at under it. */
   ids: string[];
+  /** Ids already confirmed within FRESH_DAYS at walk start: these rows begin
+   *  in the confirmed state (dimmed, counted as done, off the not-seen list)
+   *  instead of demanding a fresh ✓ — a count confirmed this week is trusted.
+   *  Snapshot too (same invariant as `ids`): freshness is evaluated ONCE at
+   *  walk start, so a re-verify mid-walk can't reclassify rows under you. */
+  freshIds: string[];
   startIso: string;
 }
 
@@ -81,12 +94,22 @@ export function ReconcileView() {
   const nowIso = now();
 
   const startWalk = (label: string, single: boolean, items: Item[]): void => {
+    const startIso = now();
+    // Confirmed-within-FRESH_DAYS at walk start. Actual confirmations only
+    // (no created_at fallback here, unlike needsCheck): a never-confirmed
+    // item on a shelf walk still deserves its first look, and a dimmed row
+    // must never claim "confirmed <age>" about a confirmation that never
+    // happened.
+    const freshAfter = Date.parse(startIso) - FRESH_DAYS * 86_400_000;
     setStage({
       name: "walk",
       label,
       single,
       ids: items.map((i) => i.id),
-      startIso: now(),
+      freshIds: items
+        .filter((i) => i.verified_at !== null && Date.parse(i.verified_at) >= freshAfter)
+        .map((i) => i.id),
+      startIso,
     });
   };
 
@@ -190,7 +213,12 @@ export function ReconcileView() {
     // updated_at too). Derived from the doc, so QtyControl edits count
     // without this view needing write callbacks.
     const isTouched = (i: Item): boolean => i.updated_at > stage.startIso;
-    const pending = rows.filter((i) => !isTouched(i));
+    // Fresh rows (confirmed within FRESH_DAYS at walk start) begin done:
+    // dimmed, counted in the progress line, off the end-of-pass not-seen
+    // list — still tappable to fix or re-verify.
+    const freshSet = new Set(stage.freshIds);
+    const isDone = (i: Item): boolean => isTouched(i) || freshSet.has(i.id);
+    const pending = rows.filter((i) => !isDone(i));
     const checked = rows.length - pending.length;
 
     const finish = (): void => {
@@ -220,16 +248,21 @@ export function ReconcileView() {
 
     const row = (item: Item) => {
       const touched = isTouched(item);
+      const done = isDone(item);
+      // A fresh, still-untouched row reads as the confirmation it already
+      // has ("confirmed 2d ago"), not as a demand for another one.
       const age =
-        item.verified_at === null
-          ? "never confirmed"
-          : `last confirmed ${fmtAge(item.verified_at, nowIso)}`;
+        !touched && freshSet.has(item.id)
+          ? `confirmed ${fmtAge(item.verified_at, nowIso)}`
+          : item.verified_at === null
+            ? "never confirmed"
+            : `last confirmed ${fmtAge(item.verified_at, nowIso)}`;
       return (
-        <li key={item.id} class={`recon-row${touched ? " recon-touched" : ""}`}>
+        <li key={item.id} class={`recon-row${done ? " recon-touched" : ""}`}>
           <div class="recon-row-head">
             <span class="row-title">
               {item.name}
-              {touched && (
+              {done && (
                 <span class="recon-check" aria-hidden="true">
                   {" "}
                   ✓
@@ -440,7 +473,14 @@ export function ReconcileView() {
   const live = liveItems(doc);
   const locations = valuesInUse(doc, "location");
   const unfiled = live.filter((i) => i.location === null);
-  const stale10 = stalest(doc).slice(0, 10);
+  // The micro-audit worklist has a FLOOR (needsCheck): items confirmed
+  // within FRESH_DAYS are trusted, so a freshly counted pantry yields an
+  // empty list — never a manufactured stalest-10 of things checked minutes
+  // ago, which would train the ✓ into a mindless reflex.
+  const needing = needsCheck(doc, nowIso);
+
+  const neverCounted = doc.items.filter((i) => i.deleted_at === null && i.verified_at === null).length;
+  const needing10 = needing.slice(0, 10);
 
   const pickRow = (key: string, title: string, sub: string, onTap: () => void) => (
     <button key={key} class="recon-pick" type="button" onClick={onTap}>
@@ -465,13 +505,26 @@ export function ReconcileView() {
             Pick a shelf to walk. Confirm what you see; fix what you don't.
           </p>
           <div class="recon-picks">
-            {/* micro-audit first: PLAN.md — "10 stalest, 2 minutes" beats
-                guilt-inducing full audits */}
-            {pickRow(
-              "stalest",
-              "10 stalest",
-              `${countText(stale10.length)} · oldest check ${fmtAge(oldestVerified(stale10), nowIso)}`,
-              () => startWalk("10 stalest", false, stale10),
+            {/* micro-audit first: PLAN.md — a two-minute pass beats
+                guilt-inducing full audits. When nothing needs a check the
+                door closes calmly: no list, no buttons to mindlessly ✓. */}
+            {needing.length === 0 ? (
+              // Never claim confirmations that didn't happen: a freshly
+              // seeded pantry is all first-week "fresh" via the created_at
+              // fallback, yet nothing was ever confirmed — say what's true
+              // and point at the first walk instead of discouraging it.
+              <p class="recon-fresh">
+                {neverCounted > 0
+                  ? `Nothing is overdue — ${neverCounted} item${neverCounted === 1 ? " is" : "s are"} still waiting for a first count. Walk a location below to count them.`
+                  : "Nothing is due for a check — recent counts get a week of trust."}
+              </p>
+            ) : (
+              pickRow(
+                "needs-check",
+                "Needs a check",
+                `${countText(needing.length)} · oldest check ${fmtAge(oldestVerified(needing10), nowIso)}`,
+                () => startWalk("Needs a check", false, needing10),
+              )
             )}
             {locations.map((loc) => {
               const items = live.filter((i) => i.location === loc);
