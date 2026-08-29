@@ -97,6 +97,10 @@
 .recon-row-head .row-sub {
   flex-shrink: 0;
 }
+/* Walk rows show the non-brief unit line ("cartons · 1.5 L"); the tight
+   list cap would ellipsize its precise side. The acts row flex-wraps, so a
+   wider value just wraps the ✓ sooner on narrow phones. */
+.recon-row-acts .stepper-value { max-width: 140px; }
 .recon-row-acts {
   display: flex;
   align-items: center;
