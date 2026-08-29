@@ -27,6 +27,7 @@ export function emptyDoc(deviceLabel = "phone"): AmbryDoc {
       retention_days: DEFAULT_RETENTION_DAYS,
       last_export_at: null,
       writes_since_export: 0,
+      last_trip_ended_at: null,
       device_label: deviceLabel,
     },
   };

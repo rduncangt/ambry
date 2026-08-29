@@ -90,10 +90,21 @@ export function migrateDoc(raw: unknown): AmbryDoc {
   const settings = doc.settings;
   const retention = coerceIntAtLeast(settings.retention_days, 1) ?? DEFAULT_RETENTION_DAYS;
   const writes = coerceIntAtLeast(settings.writes_since_export, 0) ?? 0;
-  if (settings.retention_days !== retention || settings.writes_since_export !== writes) {
+  // Older docs/backups predate the trip stamp; a valid ISO string passes
+  // through, anything else (missing, junk) becomes null.
+  const tripRaw = settings.last_trip_ended_at;
+  const trip = typeof tripRaw === "string" && !Number.isNaN(Date.parse(tripRaw)) ? tripRaw : null;
+  if (
+    settings.retention_days !== retention ||
+    settings.writes_since_export !== writes ||
+    settings.last_trip_ended_at !== trip
+  ) {
     // Copy, don't mutate: migrateDoc is pure, and when no migration ran
     // `doc` is still the caller's own object.
-    doc = { ...doc, settings: { ...settings, retention_days: retention, writes_since_export: writes } };
+    doc = {
+      ...doc,
+      settings: { ...settings, retention_days: retention, writes_since_export: writes, last_trip_ended_at: trip },
+    };
   }
   return doc as unknown as AmbryDoc;
 }

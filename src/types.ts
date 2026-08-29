@@ -112,6 +112,11 @@ export interface Settings {
   last_export_at: string | null;
   /** Stored, not derived — pruning can't distort it. */
   writes_since_export: number;
+  /** When the last shopping trip was closed ("Finish trip"): the in-cart
+   *  receipt shows purchases after max(local midnight, this stamp), so
+   *  finishing clears it immediately and the next check-off opens a fresh
+   *  trip. Null = no trip ever finished. */
+  last_trip_ended_at: string | null;
   /** Goes into the export envelope. */
   device_label: string;
 }

@@ -63,6 +63,12 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   // "in cart" at 11:30 pm even when UTC has already rolled over.
   const midnightLocal = new Date(nowIso);
   midnightLocal.setHours(0, 0, 0, 0);
+  // The in-cart receipt covers THIS trip: purchases since local midnight
+  // (inclusive) and STRICTLY after the last "Finish trip" stamp — an event
+  // sharing the stamp's instant belongs to the finished trip, so finishing
+  // clears the receipt immediately instead of waiting for the day to roll.
+  const tripEnd = doc.settings.last_trip_ended_at;
+  const tripEndMs = tripEnd !== null ? Date.parse(tripEnd) : -Infinity;
   const midnight = midnightLocal.getTime();
 
   const liveById = new Map<string, Item>();
@@ -83,7 +89,8 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   for (let i = doc.events.length - 1; i >= 0; i--) {
     const e = doc.events[i];
     if (e === undefined || decided.has(e.item_id)) continue;
-    if (Date.parse(e.at) < midnight) continue;
+    const t = Date.parse(e.at);
+    if (t < midnight || t <= tripEndMs) continue;
     const isPurchase = e.kind === "purchase";
     const isReversal = e.kind === "recount" && e.note === "put back";
     if (!isPurchase && !isReversal) continue;
