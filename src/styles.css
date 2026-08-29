@@ -32,8 +32,8 @@
   --tap: 44px;            /* minimum tap target */
   --tabbar-h: 56px;
   /* Inventory search bar: tap target + its vertical padding + hairline.
-     Shared token so the toast offset below and .inv-view's scroll clearance
-     can never disagree with the bar's real height. */
+     Shared token so .inv-view's scroll clearance can never disagree with
+     the bar's real height. */
   --searchbar-h: calc(var(--tap) + var(--s2) * 2 + 1px);
 }
 
@@ -375,17 +375,19 @@ body::after {
 }
 
 /* -- toast -----------------------------------------------------------------
-   Single slim tap-through notice docked at the very top of the viewport;
-   .toast-msg left / .toast-undo right. A floating card near the bottom
-   parked itself exactly on the controls the user just tapped — this line
-   lives in the one strip with no controls, and pointer-events: none means
-   it can NEVER block one; only the Undo button restores pointer-events.
-   .toast-leaving is the exit phase (hooks.ts unmounts after the slide). */
+   Compact tap-through pill pinned top-RIGHT; .toast-msg left / .toast-undo
+   right. A floating card near the bottom parked itself on the controls the
+   user just tapped, and the full-width top strip sat on "‹ Locations" for
+   its 3 s — the screen's left edge is where back links live, so the pill
+   keeps clear of it (max-width 72%). Same contract otherwise:
+   pointer-events: none on the container means it can NEVER block a control;
+   only the Undo button restores pointer-events. .toast-leaving is the exit
+   phase (hooks.ts unmounts after the slide). */
 .toast {
   position: fixed;
-  top: env(safe-area-inset-top);
-  left: 0;
-  right: 0;
+  top: calc(env(safe-area-inset-top) + var(--s2));
+  right: calc(env(safe-area-inset-right) + var(--s3)); /* landscape notch */
+  max-width: 72%;
   z-index: 60;
   display: flex;
   align-items: center;
@@ -395,11 +397,12 @@ body::after {
   color: var(--bg);
   font-size: 13px;
   padding: var(--s1) var(--s4);
+  border-radius: 999px;
   pointer-events: none;
   animation: toast-in 150ms ease-out;
 }
 .toast-leaving { animation: toast-out 150ms ease-in forwards; }
-/* Fade rides the slide so the line never crosses the status-bar strip
+/* Fade rides the slide so the pill never crosses the status-bar strip
    (above the safe-area inset) at full ink. */
 @keyframes toast-in {
   from { transform: translateY(-100%); opacity: 0; }
@@ -559,7 +562,7 @@ button.stepper-value:active { background: var(--accent-soft); }
    sheet-close/back-btn trick, vertically). Filled .chip-active stays the
    voice of the EXPANDED rung row, where selection state is the point. */
 .qty-rung {
-  /* A one-glyph "?" chip is ~35px wide — a rightward miss would land on the
+  /* A one-glyph "–" chip is even narrower than the old "?" — a rightward miss would land on the
      cart button and silently flag the item. Floor the width at the tap size. */
   min-width: var(--tap);
 

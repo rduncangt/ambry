@@ -119,6 +119,13 @@
   padding: 0;
 }
 
+/* Location item lists breathe one spacing step over the shared .row rhythm
+   (search results keep the dense default): this is the shelf being read
+   down, not a ranked lookup. The age microcaption ("confirmed 12d ago",
+   due-a-check rows only) sits one voice below the shared 14px .row-sub. */
+.inv-loc-list .row { padding: var(--s2) 0; }
+.inv-loc-list .row-sub { font-size: 13px; }
+
 /* The name area is a button (opens the item overlay): strip button chrome,
    keep the .row-main flex sizing, stack title over caption. */
 .inv-open {
