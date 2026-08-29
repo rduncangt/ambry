@@ -36,6 +36,7 @@ import { planMerge } from "../domain/merge";
 import { pruneDoc } from "../domain/prune";
 import { buildExport as buildEnvelope } from "../domain/exportImport";
 import { planPackageResize, type UnitChangePlan } from "../domain/units";
+import { shoppingList } from "./selectors";
 
 export const COALESCE_MS = 2000;
 export const SAVE_DEBOUNCE_MS = 100;
@@ -236,6 +237,12 @@ export interface Store {
   deleteSnapshot(key: string): void;
   /** Settings edits (retention_days, device_label). */
   updateSettings(fields: Partial<Pick<AmbryDoc["settings"], "retention_days" | "device_label">>): void;
+  /** Close the current shopping trip: stamps last_trip_ended_at so the
+   *  in-cart receipt clears immediately and the next check-off opens a
+   *  fresh trip. Returns how many items were on the receipt (for the
+   *  summary toast). Purchases/quantities are untouched — they were
+   *  applied at each check-off; this only ends the trip's bookkeeping. */
+  finishTrip(): number;
 }
 
 /**
@@ -889,6 +896,13 @@ export function createStore(
       if (fields.retention_days !== undefined) doc.settings.retention_days = fields.retention_days;
       if (fields.device_label !== undefined) doc.settings.device_label = fields.device_label;
       committed();
+    },
+
+    finishTrip() {
+      const receipt = shoppingList(doc, nowFn()).inCart.length;
+      doc.settings.last_trip_ended_at = nowFn();
+      committed();
+      return receipt;
     },
   };
 }
