@@ -13,6 +13,14 @@
 }
 .shop-empty { color: var(--muted); padding: var(--s3) 0; }
 
+/* One-line explainer directly under a section title ("checked off this
+   trip"): same muted voice, no uppercase — it explains, it doesn't label. */
+.shop-section-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin: calc(-1 * var(--s1)) 0 var(--s1);
+}
+
 /* Store-aisle category headers inside To Buy: one quiet voice down from the
    section title (no uppercase — these are the user's own words, "dairy",
    not app chrome), enough to mark the shelf boundary on a walk without
@@ -69,7 +77,8 @@
   text-underline-offset: 2px;
 }
 
-/* -- in-cart rows are confirmations, not controls -------------------------- */
+/* -- in-cart rows are dimmed confirmations; their one control is the quiet
+   "Put back" escape hatch (a .shop-quiet inside the row) ------------------- */
 .shop-cart-row { opacity: 0.55; }
 .shop-cart-mark { color: var(--ok); font-size: 20px; padding: 0 var(--s3); }
 

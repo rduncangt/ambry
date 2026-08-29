@@ -269,6 +269,19 @@ Only a `purchase` event or an explicit manual clear lowers it; recount-up never 
 muted no-bell marker in normal views so silent suppression stays auditable. Flag changes
 are item fields, not events — provenance survives pruning (R2).
 
+> **Revision (2026-08-28).** The strict-crossing raise (`before > threshold ≥ after`)
+> had two dead zones, both confirmed on device and both contradicting the UI's
+> "auto-flags at or below N" promise: an item first-counted AT its threshold never
+> flagged (its seeded `before` of 0 is not above the threshold), and an item sitting
+> exactly at its threshold that then dropped below never flagged either. The raise rule
+> is now: raise when `!never_prompt`, the item has a threshold, is not already flagged,
+> the write lands `after ≤ threshold`, and either the move is downward (`after <
+> before`) or it is the item's first observation (`verified_at` still null pre-write —
+> a first count landing low, including a first count of exactly 0, IS the news that
+> stock is low). Purchase still always clears and never raises, so buying back to
+> exactly the threshold still does not instantly re-raise; upward writes on counted
+> items still never raise (no nag on corrections). Implemented in `src/domain/flags.ts`.
+
 **Ladder.** Read buckets over quantity: ≥ 0.75 Full, ≥ 0.35 Half, > 0 Low, 0 Out;
 qty > 1 renders "Full +N". Write: rung tap = `recount` to 1.0 / 0.5 / 0.2 / 0, confirm
 required when qty > 1 (§1.7). Mapping is a code constant, not a setting.
@@ -278,7 +291,7 @@ as the in-cart section — items with a `purchase` event today (derived from eve
 `in_cart` field, so mid-trip state survives page kills for free). Check-off on a flagged
 item: `purchase` event, +`restock_amount` (shown, tappable to correct — bought 2, not 1),
 flag cleared. Check-off on an extra: soft delete + optional "add to pantry?" quick-create.
-Undo toast (5 s) after every write, implemented as a compensating event — history stays
+Undo toast (3 s) after every write, implemented as a compensating event — history stays
 append-only.
 
 **Merge** (duplicate repair): survivor keeps its ID; loser gets `deleted_at` +
@@ -500,7 +513,7 @@ adapter.
 | Launch view | Inventory, search pinned, grouped by location, alpha within; no launch-state memory | The 3-second answer is decided at cold launch |
 | Search focus | Big target, NOT auto-focused | Keyboard jumping up on every launch is friction |
 | Quantity zero | Stays visible with "out" badge + Out filter | Auto-hide makes absence indistinguishable from never-tracked |
-| Threshold comparison | Raise on downward crossing to ≤ threshold | Edge-triggered; §1.2 |
+| Threshold comparison | Raise when a write lands ≤ threshold moving down, or on the item's first count | Revised 2026-08-28 — see §2 Flags; purchases excepted |
 | Purchase always clears flag | Yes, even if still ≤ threshold | Matches the brief's letter; next use re-crosses and re-flags |
 | Ladder mapping | 1.0/0.5/0.2/0 write; 0.75/0.35/>0/0 read; code constant | Configurability here adds decisions, not accuracy |
 | Quantity precision | Round 3 decimals on write, clamp ≥ 0 | Kills float noise before it persists |
