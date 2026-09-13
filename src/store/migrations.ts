@@ -81,13 +81,29 @@ export function migrateDoc(raw: unknown): AmbryDoc {
   if (!isPlainObject(doc.settings)) {
     throw new InvalidDocError('Missing or non-object "settings"');
   }
+  const settings = doc.settings;
+
+  // Trip plans are optional in v1. Ignore malformed overrides so an old or
+  // hand-edited backup falls back to the usual amount, never string-adds a
+  // purchase or injects NaN. Preserve all other fields and caller identity
+  // when nothing needs cleaning.
+  let cleanedPlans = false;
+  const items = (doc.items as unknown[]).map((item) => {
+    if (!isPlainObject(item) || !("shopping_amount" in item)) return item;
+    const amount = item.shopping_amount;
+    if (typeof amount === "number" && Number.isFinite(amount) && amount >= 0) return item;
+    const copy = { ...item };
+    delete copy.shopping_amount;
+    cleanedPlans = true;
+    return copy;
+  });
+  if (cleanedPlans) doc = { ...doc, items };
 
   // Coerce the settings numerics arithmetic depends on. A hand-edited backup
   // with a missing or garbage retention_days would make pruneDoc's cutoff
   // NaN — every date comparison goes false and history is silently dropped
   // or kept wholesale. Fallbacks, not errors: a backup must never be
   // rejected over a tunable.
-  const settings = doc.settings;
   const retention = coerceIntAtLeast(settings.retention_days, 1) ?? DEFAULT_RETENTION_DAYS;
   const writes = coerceIntAtLeast(settings.writes_since_export, 0) ?? 0;
   // Older docs/backups predate the trip stamp; a valid ISO string passes

@@ -294,6 +294,16 @@ flag cleared. Check-off on an extra: soft delete + optional "add to pantry?" qui
 Undo toast (3 s) after every write, implemented as a compensating event — history stays
 append-only.
 
+> **Revision (2026-09-13).** Shopping amount edits persist immediately through the
+> store in optional `Item.shopping_amount` (same unit as quantity), rather than
+> component state that resets on navigation or reopening. Missing means use
+> `restock_amount`; the “Usually buy” default stays separate. Editing the plan
+> changes no stock, flags, observation stamp, or history. Purchase uses the plan
+> and keeps it for Undo/Put back. Finish trip clears completed items' plans while
+> unbought items retain theirs; explicit removal/deletion discards the plan.
+> Unit/package conversions also convert the plan, or discard it when the guarded
+> unit flow requires re-entry. Existing v1 backups need no new required field.
+
 **Merge** (duplicate repair): survivor keeps its ID; loser gets `deleted_at` +
 `merged_into`; loser's name and aliases append to survivor's aliases — so every repaired
 duplicate permanently immunizes future searches against its recurrence. **Events are never
