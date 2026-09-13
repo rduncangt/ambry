@@ -47,6 +47,9 @@ export interface Item {
   flagged_at: string | null;
   /** Default purchase quantity, in `unit`. */
   restock_amount: number;
+  /** This shopping trip's chosen amount, in `unit`; absent = restock_amount.
+   *  Optional so existing v1 documents/backups retain their usual default. */
+  shopping_amount?: number;
   /** Suppresses threshold auto-raise ONLY; manual flagging still works. */
   never_prompt: boolean;
 

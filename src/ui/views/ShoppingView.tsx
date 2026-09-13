@@ -29,15 +29,6 @@ export function ShoppingView() {
   const nowIso = now();
   const list = shoppingList(doc, nowIso);
 
-  // Pending buy amounts, keyed by item id at VIEW level: a row keeps its
-  // corrected amount ("3 tubs, not 1") even when regrouping or a check-off
-  // + undo remounts it mid-trip. Session-local by design — nothing is
-  // written until the check-off itself (purchase uses this amount then).
-  const [amounts, setAmounts] = useState<Record<string, number>>({});
-  const setAmount = (id: string, n: number): void => {
-    setAmounts((a) => ({ ...a, [id]: n }));
-  };
-
   return (
     <section class="view">
       {/* Sticky like Pantry's header: the notice pill docks top-right, and
@@ -72,8 +63,6 @@ export function ShoppingView() {
                   key={item.id}
                   item={item}
                   nowIso={nowIso}
-                  pending={amounts[item.id] ?? item.restock_amount}
-                  onPending={(n) => setAmount(item.id, n)}
                 />
               ))}
             </div>
@@ -166,16 +155,14 @@ function InCartRow(props: { item: Item }) {
 function ToBuyRow(props: {
   item: Item;
   nowIso: string;
-  /** Pending purchase amount (view-level state), corrected BEFORE the buy
-   *  tap — the amount purchase() will apply on check-off. */
-  pending: number;
-  onPending: (n: number) => void;
 }) {
   const store = useStore();
   const toast = useToast();
   const nav = useNav();
   const item = props.item;
-  const pending = props.pending;
+  // The plan belongs to the saved item: remounting this view or reopening
+  // the app must not silently replace it with the usual restock default.
+  const pending = item.shopping_amount ?? item.restock_amount;
 
   const [entering, setEntering] = useState(false); // decimal entry open
 
@@ -199,7 +186,7 @@ function ToBuyRow(props: {
       flagged_at: item.flagged_at,
       verified_at: item.verified_at,
     };
-    store.purchase(item.id, pending);
+    store.purchase(item.id);
     // QtyControl's toast pattern: the store mutated `item` in place, so
     // reading it again gives the post-write state; purchase is a gesture
     // kind, so lastQuantityWrite() feeds the compensating undo.
@@ -218,10 +205,14 @@ function ToBuyRow(props: {
     // PLAN.md §1.2 fix 4: the flag path that never ends in a purchase.
     // Action language, not state language — the button removes the item
     // from the list; whether there is "plenty" is not its claim to make.
+    const planned = item.shopping_amount;
     store.clearFlag(item.id);
     // Undo re-raises manually — provenance becomes "manual"/now, which is
     // honest: the re-raise IS a fresh human decision.
-    toast(`${item.name}: removed from list`, () => store.flagManual(item.id));
+    toast(`${item.name}: removed from list`, () => {
+      store.flagManual(item.id);
+      if (planned !== undefined) store.setShoppingAmount(item.id, planned);
+    });
   };
 
   // ALWAYS-VISIBLE compact stepper: realizing mid-aisle that it's 3 tubs,
@@ -239,7 +230,7 @@ function ToBuyRow(props: {
         // parseDec rejects blank/garbage/negative — any of those leaves
         // the pending amount unchanged (the store rounds on the write).
         const n = parseDec(raw);
-        if (n !== null) props.onPending(n);
+        if (n !== null) store.setShoppingAmount(item.id, n);
       }}
     />
   ) : (
@@ -248,7 +239,7 @@ function ToBuyRow(props: {
         value={`+${qtyLines(pending, item.unit).num}`}
         unit={qtyLines(pending, item.unit).unit}
         valueTitle="Amount to buy — tap to type an exact amount"
-        onDelta={(d) => props.onPending(Math.max(0, pending + d))}
+        onDelta={(d) => store.setShoppingAmount(item.id, Math.max(0, pending + d))}
         onTapValue={() => setEntering(true)}
       />
     </span>

@@ -35,7 +35,7 @@ import { rungValue } from "../domain/ladder";
 import { planMerge } from "../domain/merge";
 import { pruneDoc } from "../domain/prune";
 import { buildExport as buildEnvelope } from "../domain/exportImport";
-import { planPackageResize, type UnitChangePlan } from "../domain/units";
+import { planPackageResize, planUnitChange, type UnitChangePlan } from "../domain/units";
 import { resolveVocabValue, shoppingList, valuesInUse } from "./selectors";
 
 export const COALESCE_MS = 2000;
@@ -117,7 +117,9 @@ export interface Store {
   setQuantity(id: string, qty: number): void;
   /** Ladder tap: recount to the rung value, stamps verified_at. Caller handles the qty>1 confirm. */
   setLadderRung(id: string, rung: LadderRung): void;
-  /** Shopping check-off: qty += amount ?? restock_amount, kind `purchase`, ALWAYS clears the flag. */
+  /** Save this trip's buy amount without changing stock or its observation/history. */
+  setShoppingAmount(id: string, amount: number): void;
+  /** Shopping check-off: adds the explicit, planned, or usual amount (in that order); always clears the flag. */
   purchase(id: string, amount?: number): void;
   /**
    * Put back from the cart: reverse the item's most recent purchase since
@@ -266,7 +268,8 @@ export interface Store {
    *  in-cart receipt clears immediately and the next check-off opens a
    *  fresh trip. Returns how many items were on the receipt (for the
    *  summary toast). Purchases/quantities are untouched — they were
-   *  applied at each check-off; this only ends the trip's bookkeeping. */
+   *  applied at each check-off. Completed items' planned amounts are cleared;
+   *  unbought items keep theirs. */
   finishTrip(): number;
 }
 
@@ -580,6 +583,7 @@ export function createStore(
       // Idempotent: a second tap must not mint a second tombstone event.
       if (item.deleted_at !== null) return;
       item.deleted_at = nowFn();
+      delete item.shopping_amount;
       commitQuantity(item, item.quantity, "delete");
     },
 
@@ -612,9 +616,23 @@ export function createStore(
       commitQuantity(item, rungValue(rung), "recount", { stampVerified: true });
     },
 
+    setShoppingAmount(id, amount) {
+      if (!Number.isFinite(amount) || amount < 0) return;
+      const item = itemById(id);
+      if (item.deleted_at !== null || !item.flagged) return;
+      const rounded = roundQty(amount);
+      if (!Number.isFinite(rounded)) return;
+      if (item.shopping_amount === rounded) return;
+      item.shopping_amount = rounded;
+      item.updated_at = nowFn();
+      committed();
+    },
+
     purchase(id, amount) {
       const item = itemById(id);
-      commitQuantity(item, item.quantity + (amount ?? item.restock_amount), "purchase");
+      // Keep the plan until Finish trip so Undo/Put back restores the same
+      // buy amount even after navigation or a reload.
+      commitQuantity(item, item.quantity + (amount ?? item.shopping_amount ?? item.restock_amount), "purchase");
     },
 
     unpurchase(id) {
@@ -681,6 +699,7 @@ export function createStore(
       item.flagged = false;
       item.flag_source = null;
       item.flagged_at = null;
+      delete item.shopping_amount;
       item.updated_at = nowFn();
       committed();
     },
@@ -708,6 +727,9 @@ export function createStore(
     changeUnit(id, newUnit, plan, reentered) {
       const item = itemById(id);
       const unitBefore = item.unit;
+      const shoppingPlan = item.shopping_amount === undefined ? null : planUnitChange(
+        { ...item, quantity: item.shopping_amount, threshold: null }, newUnit,
+      );
 
       let quantity: number;
       if (plan.kind === "convert") {
@@ -729,6 +751,10 @@ export function createStore(
       // New unit goes on the item FIRST so the event's `unit` snapshot is the
       // one qty_after is denominated in; qty_before keeps unit_before.
       item.unit = newUnit;
+      // A trip amount shares the unit too. Convert when possible; otherwise
+      // discard the old denomination alongside the guarded re-entry flow.
+      if (shoppingPlan?.kind === "convert") item.shopping_amount = roundQty(shoppingPlan.quantity);
+      else delete item.shopping_amount;
       commitQuantity(item, quantity, "unit_change", { unitBefore });
     },
 
@@ -739,6 +765,11 @@ export function createStore(
       // package ratio; keep-count leaves the numbers (their physical meaning
       // changes). Both come from the pure planner.
       const plan = planPackageResize(item, newPackage, keep);
+      if (item.shopping_amount !== undefined) {
+        item.shopping_amount = roundQty(planPackageResize(
+          { ...item, quantity: item.shopping_amount, threshold: null }, newPackage, keep,
+        ).quantity);
+      }
       const beforeText = before === null ? "none" : `${before.amount} ${before.unit}`;
       const note = `package ${beforeText} -> ${newPackage.amount} ${newPackage.unit} (keep ${keep})`;
       item.package_size = { ...newPackage };
@@ -965,7 +996,16 @@ export function createStore(
 
     finishTrip() {
       const receipt = shoppingList(doc, nowFn()).inCart.length;
-      doc.settings.last_trip_ended_at = nowFn();
+      const at = nowFn();
+      // Unbought items keep their plans for the next visit. Completed buys
+      // return to the usual default when they next need restocking.
+      for (const item of doc.items) {
+        if (!item.flagged && item.shopping_amount !== undefined) {
+          delete item.shopping_amount;
+          item.updated_at = at;
+        }
+      }
+      doc.settings.last_trip_ended_at = at;
       committed();
       return receipt;
     },
