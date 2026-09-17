@@ -27,7 +27,10 @@ void navigator.storage?.persist?.().catch(() => undefined);
 // Service worker: production only (dev caching is a footgun). The App renders
 // the "Update ready" pill via the announce/subscribe bridge in sw-client.
 if (import.meta.env.PROD) {
-  registerSW(announceUpdate);
+  registerSW(announceUpdate, () => {
+    store.flush();
+    return !store.saveError() && !store.storageConflict();
+  });
 }
 
 render(<App store={store} />, document.getElementById("app")!);

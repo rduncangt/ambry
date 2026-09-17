@@ -208,3 +208,15 @@
   font-weight: 400;
   font-size: 15px;
 }
+
+.inv-organize { margin-top: var(--s1); }
+.organize-form { display: flex; flex-direction: column; gap: var(--s3); }
+.organize-field { display: flex; flex-direction: column; gap: var(--s1); }
+.organize-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); }
+.organize-list { max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain; }
+.organize-row { display: flex; align-items: center; gap: var(--s3); min-height: 56px; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+.organize-row input { width: 22px; height: 22px; accent-color: var(--accent); flex-shrink: 0; }
+.organize-row > span { min-width: 0; }
+.organize-form button:disabled { opacity: 0.45; }
+
+.organize-preview { max-height: 100px; overflow-y: auto; }
