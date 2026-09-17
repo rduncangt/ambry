@@ -37,6 +37,7 @@ import { pruneDoc } from "../domain/prune";
 import { buildExport as buildEnvelope } from "../domain/exportImport";
 import { planPackageResize, planUnitChange, type UnitChangePlan } from "../domain/units";
 import { resolveVocabValue, shoppingList, valuesInUse } from "./selectors";
+import { planOrganization, planOrganizationUndo, type OrganizationChange, type OrganizationFields } from "../domain/organize";
 
 export const COALESCE_MS = 2000;
 export const SAVE_DEBOUNCE_MS = 100;
@@ -101,6 +102,9 @@ export interface Store {
   createItem(input: CreateItemInput): Item;
   /** Non-quantity field edits. display_mode -> "ladder" with null threshold also applies the ladder default. No event (updated_at only). */
   editItem(id: string, fields: EditItemFields): void;
+  /** Change location/category for the selection in one commit; return undo data. */
+  organizeItems(ids: string[], fields: OrganizationFields): OrganizationChange[];
+  undoOrganization(changes: OrganizationChange[]): void;
   /** Soft delete. Emits `delete` (qty_before = qty_after = quantity). */
   softDelete(id: string): void;
   /**
@@ -380,6 +384,18 @@ export function createStore(
     return item;
   }
 
+  function commitOrganization(changes: OrganizationChange[]): void {
+    if (changes.length === 0) return;
+    const at = nowFn();
+    for (const change of changes) {
+      const item = itemById(change.id);
+      if (change.after.location !== undefined) item.location = change.after.location;
+      if (change.after.category !== undefined) item.category = change.after.category;
+      item.updated_at = at;
+    }
+    committed();
+  }
+
   function extraById(id: string): ShoppingExtra {
     const extra = doc.extras.find((x) => x.id === id);
     if (extra === undefined) throw new Error(`Unknown extra: ${id}`);
@@ -576,6 +592,16 @@ export function createStore(
       }
       item.updated_at = nowFn();
       committed();
+    },
+
+    organizeItems(ids, fields) {
+      const changes = planOrganization(doc.items, ids, fields, doc.settings.declared_locations);
+      commitOrganization(changes);
+      return changes;
+    },
+
+    undoOrganization(changes) {
+      commitOrganization(planOrganizationUndo(doc.items, changes));
     },
 
     softDelete(id) {
