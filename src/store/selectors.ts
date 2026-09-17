@@ -6,6 +6,7 @@
  */
 import { sortEventsNewestFirst } from "../domain/history";
 import { historyFor } from "../domain/merge";
+import { purchaseAmounts, type PurchaseAmount } from "../domain/purchases";
 import type { AmbryDoc, Item, ShoppingExtra, HistoryEvent } from "../types";
 import { EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
 
@@ -45,6 +46,8 @@ export interface ShoppingList {
    * item belongs to To Buy and must never appear in both sections at once.
    */
   inCart: Item[];
+  /** Actual purchases this trip, separate from current pantry quantities. */
+  cartAmounts: Map<string, PurchaseAmount[]>;
 }
 
 export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
@@ -102,7 +105,11 @@ export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
   }
   inCart.reverse(); // newest-first scan flipped: rows order by each item's LATEST purchase, oldest of those first
 
-  return { toBuy, extras, inCart };
+  const cartAmounts = purchaseAmounts(doc.events.filter((e) => {
+    const t = Date.parse(e.at);
+    return t >= midnight && t > tripEndMs;
+  }));
+  return { toBuy, extras, inCart, cartAmounts };
 }
 
 export interface CategoryGroup {
