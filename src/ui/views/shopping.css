@@ -103,8 +103,8 @@
 
 /* Visible buy-amount stepper: the shared capsule one voice quieter than
    the cart button — the check-off stays THE gesture; this only corrects
-   what it will write. Muted small +/− glyphs; the value keeps the "+1 tub"
-   accent voice. (The capsule border and transparent buttons come from the
+   what it will write. Muted small +/− glyphs; the value keeps the quantity in the
+   accent color, beside the explicit Buy label. (The capsule border and transparent buttons come from the
    base .stepper.) */
 .shop-stepper .stepper-btn {
   color: var(--muted);
@@ -197,6 +197,7 @@
 /* The age chip: one glyph-width of list-age ("3d") — scannable down the
    whole list; the sentence version rides its title attribute. */
 .shop-age {
+  margin-left: var(--s2);
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
@@ -210,3 +211,6 @@
   width: 100%;
   margin-top: var(--s2);
 }
+
+.shop-buy-amount { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+.shop-buy-label { color: var(--muted); font-size: 14px; font-weight: 600; }

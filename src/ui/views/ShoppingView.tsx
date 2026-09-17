@@ -15,7 +15,8 @@
  * All writes go through Store commands (AGENTS.md rule 1).
  */
 import { useState } from "preact/hooks";
-import { fmtAge, fmtLevel, fmtQty, parseDec, fmtAgeShort } from "../../domain/format";
+import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, isUncounted, parseDec, fmtAgeShort } from "../../domain/format";
+import type { PurchaseAmount } from "../../domain/purchases";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
 import { CartMinusIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
@@ -77,7 +78,7 @@ export function ShoppingView() {
           <h2 class="shop-section-title">In the cart</h2>
           <p class="shop-section-sub">checked off this trip</p>
           {list.inCart.map((item) => (
-            <InCartRow key={item.id} item={item} />
+            <InCartRow key={item.id} item={item} bought={list.cartAmounts.get(item.id) ?? []} />
           ))}
           {/* The trip's closing verb. Quantities and flags were applied at
               each check-off — this clears the receipt, stamps the trip, and
@@ -106,7 +107,7 @@ export function ShoppingView() {
 // IN THE CART row — dimmed confirmation with the put-back escape hatch
 // ---------------------------------------------------------------------------
 
-function InCartRow(props: { item: Item }) {
+function InCartRow(props: { item: Item; bought: PurchaseAmount[] }) {
   const store = useStore();
   const toast = useToast();
   const nav = useNav();
@@ -133,7 +134,8 @@ function InCartRow(props: { item: Item }) {
       <div class="shop-card-top">
         <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
           <div class="row-title">{item.name}</div>
-          <div class="row-sub">{fmtLevel(item)}</div>
+          <div class="row-sub">Bought {props.bought.map((p) => fmtQtyUnit(p.amount, p.unit)).join(" + ")}</div>
+          <div class="row-sub">Now have {fmtLevel(item)}</div>
         </button>
         <button
           class="shop-check shop-check-remove"
@@ -166,10 +168,9 @@ function ToBuyRow(props: {
 
   const [entering, setEntering] = useState(false); // decimal entry open
 
-  // Caption = just the level. Flag provenance lives on the item page, and
-  // list-age moved to the corner chip below — the caption sentence was the
-  // last crammed field standing.
-  const caption = fmtLevel(item);
+  // Label pantry stock explicitly so it cannot be confused with the buy
+  // amount. Unknown stock stays unknown; flag provenance lives on the item page.
+  const caption = isUncounted(item) ? "Have: not counted" : `Have: ${fmtLevel(item)}`;
   // List-age lives in a compact corner chip ("3d"), not a caption sentence —
   // scannable down the whole list at a glance; the full wording rides the
   // title attribute for anyone who presses in.
@@ -191,7 +192,7 @@ function ToBuyRow(props: {
     // reading it again gives the post-write state; purchase is a gesture
     // kind, so lastQuantityWrite() feeds the compensating undo.
     const last = store.lastQuantityWrite();
-    const message = `Bought ${item.name} — ${fmtLevel(item)}`;
+    const message = `Bought ${item.name} — now have ${fmtLevel(item)}`;
     if (last === null) toast(message);
     else
       toast(message, () =>
@@ -236,7 +237,7 @@ function ToBuyRow(props: {
   ) : (
     <span class="shop-stepper">
       <Stepper
-        value={`+${qtyLines(pending, item.unit).num}`}
+        value={qtyLines(pending, item.unit).num}
         unit={qtyLines(pending, item.unit).unit}
         valueTitle="Amount to buy — tap to type an exact amount"
         onDelta={(d) => store.setShoppingAmount(item.id, Math.max(0, pending + d))}
@@ -277,7 +278,7 @@ function ToBuyRow(props: {
         </button>
       </div>
       <div class="shop-card-acts">
-        {amount}
+        <div class="shop-buy-amount"><span class="shop-buy-label">Buy</span>{amount}</div>
         <button
           class="shop-check shop-check-add"
           type="button"

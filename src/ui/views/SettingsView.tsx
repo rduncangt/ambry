@@ -5,7 +5,7 @@
  * (AGENTS.md rule 1); import is the gated whole-file REPLACE with the
  * §1.3 staleness guard — and snapshot restores reuse the same gate.
  */
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { checkStaleness, parseImport, type StalenessCheck } from "../../domain/exportImport";
 import { fmtAge } from "../../domain/format";
 import { SNAPSHOT_PREFIX } from "../../store/adapter";
@@ -14,7 +14,7 @@ import { now, type AmbryDoc } from "../../types";
 import { APP_VERSION } from "../../version";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import { doExportWithToast, pickFile, readText } from "../share";
-import { isIOS, isStandalone } from "../sw-client";
+import { checkForUpdates, getUpdateStatus, isIOS, isStandalone, subscribeUpdate, subscribeUpdateStatus, type UpdatePhase } from "../sw-client";
 import "./settings.css";
 
 export function SettingsView() {
@@ -562,6 +562,19 @@ function HousekeepingSection() {
 
 function AboutSection() {
   const doc = useDoc();
+  const [update, setUpdate] = useState(getUpdateStatus);
+  const [restart, setRestart] = useState<(() => void) | null>(null);
+  useEffect(() => subscribeUpdateStatus(setUpdate), []);
+  useEffect(() => subscribeUpdate((apply) => setRestart(() => apply)), []);
+  const updateText: Record<UpdatePhase, string> = {
+    idle: "Check whether a newer version is available.",
+    checking: "Checking for updates…",
+    downloading: "Downloading an update…",
+    current: "You're up to date.",
+    ready: "Update ready — restart to install it.",
+    error: "Could not check or download the update. Check your connection and try again.",
+    unavailable: "Update checks aren't available in this browser or development build.",
+  };
   const live = liveItems(doc).length;
   const deleted = doc.items.length - live;
   // The doc IS one JSON string in storage, so its serialized length is the
@@ -572,8 +585,17 @@ function AboutSection() {
     <section class="settings-section">
       <h2 class="settings-h">About</h2>
       <div class="settings-kv">
-        <span class="settings-kv-label">Version</span>
+        <span class="settings-kv-label">Installed version</span>
         <span>{APP_VERSION}</span>
+      </div>
+      <div class="settings-updates">
+        <p class="settings-note" role="status">{updateText[update.phase]}</p>
+        {update.checkedAt !== null && <p class="settings-note">Last checked {new Date(update.checkedAt).toLocaleString()}</p>}
+        {update.phase === "ready" && restart !== null ? (
+          <button class="btn btn-primary" type="button" onClick={restart}>Restart to update</button>
+        ) : (
+          <button class="btn" type="button" disabled={update.phase === "checking" || update.phase === "downloading"} onClick={() => void checkForUpdates()}>Check for updates</button>
+        )}
       </div>
       <div class="settings-kv">
         <span class="settings-kv-label">Items</span>

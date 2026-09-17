@@ -304,6 +304,24 @@ append-only.
 > Unit/package conversions also convert the plan, or discard it when the guarded
 > unit flow requires re-entry. Existing v1 backups need no new required field.
 
+> **Revision (2026-09-17).** Shopping cards label current stock “Have” and
+> the planned purchase “Buy”. The cart shows unreversed purchase totals for
+> the active trip, using each event's recorded unit, beside current stock.
+> Repeated purchases are summed only within the same unit.
+
+**Bulk organization (2026-09-17).** Pantry → Organize items selects live items
+by search/location, then applies location and/or category in one store commit.
+Untouched fields, stock, flags, verification stamps and events stay unchanged.
+Existing vocabulary casing wins; new values and explicit clearing are allowed.
+The whole selection is validated before writing. Undo restores only fields that
+still match the bulk edit, preserving intervening edits and deletions.
+
+**Manual update checks (2026-09-17).** More shows the installed version and a
+Check for updates action with checking/downloading/current/ready/error states.
+An update is ready only after installation finishes. Failed or offline checks
+never report “up to date”; restarting first flushes pending pantry writes and
+refuses to reload when saving fails or another tab changed storage.
+
 **Merge** (duplicate repair): survivor keeps its ID; loser gets `deleted_at` +
 `merged_into`; loser's name and aliases append to survivor's aliases — so every repaired
 duplicate permanently immunizes future searches against its recurrence. **Events are never

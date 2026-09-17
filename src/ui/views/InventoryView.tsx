@@ -42,6 +42,7 @@ import { now, type Item } from "../../types";
 import { QtyControl } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./inventory.css";
+import { OrganizeSheet } from "./OrganizeSheet";
 
 const DAY_MS = 86_400_000;
 
@@ -135,6 +136,7 @@ export function InventoryView() {
   const nav = useNav();
   const store = useStore();
   const [query, setQuery] = useState("");
+  const [organizing, setOrganizing] = useState(false);
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
    *  `string | null` could not also mean "nothing open". `uncountedIds` and
@@ -239,7 +241,14 @@ export function InventoryView() {
             )}
           </>
         )}
+        <button class="btn inv-organize" type="button" onClick={() => setOrganizing(true)}>Organize items</button>
       </header>
+
+      {organizing && <OrganizeSheet
+        initialLocation={searching ? undefined : open?.location}
+        initialQuery={query}
+        onClose={() => setOrganizing(false)}
+      />}
 
       {searching ? (
         <SearchResults
