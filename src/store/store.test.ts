@@ -393,7 +393,7 @@ describe("unpurchase (put back from the cart)", () => {
     expect(item.flagged).toBe(false);
     let list = shoppingList(store.getDoc(), clock.now());
     expect(list.toBuy).toEqual([]);
-    expect(list.inCart).toEqual([item]);
+    expect(list.inCart).toEqual([]); // an already completed purchase is not a pending cart
 
     clock.advance(5000);
     store.unpurchase(item.id);
@@ -1535,43 +1535,40 @@ describe("unpurchase reports what it did", () => {
   });
 });
 
-describe("finishTrip", () => {
-  it("clears the in-cart receipt immediately and reports its size", () => {
+describe("checkout lifecycle", () => {
+  it("books staged purchases and clears the cart with one trip stamp", () => {
     const { store, clock } = fresh();
-    const a = store.createItem({ name: "Apples", quantity: 0 });
-    const b = store.createItem({ name: "Bread", quantity: 0 });
-    store.flagManual(a.id);
-    store.flagManual(b.id);
-    store.purchase(a.id, 3);
-    store.purchase(b.id, 1);
+    const a = store.createItem({ name: "a", quantity: 2 });
+    const b = store.createItem({ name: "b", quantity: 1 });
+    store.flagManual(a.id); store.flagManual(b.id);
+    store.setShoppingAmount(a.id, 3);
+    store.stageItem(a.id); store.stageItem(b.id);
     expect(shoppingList(store.getDoc(), clock.now()).inCart).toHaveLength(2);
-    expect(store.finishTrip()).toBe(2);
+    expect(store.checkout()).toEqual({ ok: true, itemCount: 2, extras: [] });
     expect(shoppingList(store.getDoc(), clock.now()).inCart).toHaveLength(0);
+    expect(store.getDoc().items.map((i) => i.quantity)).toEqual([5, 2]);
+    expect(store.getDoc().settings.last_trip_ended_at).toBe(clock.now());
   });
 
-  it("the next check-off opens a fresh trip", () => {
+  it("a second cart on the same day books only its own staged amount", () => {
     const { store, clock } = fresh();
-    const a = store.createItem({ name: "Milk", quantity: 0 });
-    store.flagManual(a.id);
-    store.purchase(a.id, 1);
-    store.finishTrip();
-    clock.advance(60_000);
-    const b = store.createItem({ name: "Eggs", quantity: 0 });
-    store.flagManual(b.id);
-    store.purchase(b.id, 12);
-    const cart = shoppingList(store.getDoc(), clock.now()).inCart;
-    expect(cart.map((i) => i.name)).toEqual(["Eggs"]);
+    const item = store.createItem({ name: "a", quantity: 0 });
+    store.flagManual(item.id); store.stageItem(item.id); store.checkout();
+    clock.advance(1000);
+    store.flagManual(item.id); store.setShoppingAmount(item.id, 12); store.stageItem(item.id);
+    expect(store.getDoc().items[0]?.quantity).toBe(1);
+    store.checkout();
+    expect(store.getDoc().items[0]?.quantity).toBe(13);
+    expect(shoppingList(store.getDoc()).inCart).toEqual([]);
   });
 
-  it("finishing an empty cart reports zero and stays harmless", () => {
+  it("an empty checkout does not create a write or trip stamp", () => {
     const { store } = fresh();
-    expect(store.finishTrip()).toBe(0);
+    const before = JSON.stringify(store.getDoc());
+    expect(store.checkout()).toEqual({ ok: true, itemCount: 0, extras: [] });
+    expect(JSON.stringify(store.getDoc())).toBe(before);
   });
 });
-
-// ---------------------------------------------------------------------------
-// deleteEvent — the history record edit
-// ---------------------------------------------------------------------------
 
 describe("deleteEvent", () => {
   it("removes exactly the named events; unknown ids are ignored", () => {

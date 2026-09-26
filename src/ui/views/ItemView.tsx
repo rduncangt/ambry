@@ -1214,7 +1214,7 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
             />
             <span class="muted">{item.unit === "count" ? "" : item.unit}</span>
           </div>
-          <p class="muted item-hint">Checking it off while shopping adds this much.</p>
+          <p class="muted item-hint">The default amount to buy. Added to the pantry at checkout.</p>
         </div>
 
         <div class="item-field">

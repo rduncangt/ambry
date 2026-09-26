@@ -36,8 +36,9 @@ import { planMerge } from "../domain/merge";
 import { pruneDoc } from "../domain/prune";
 import { buildExport as buildEnvelope } from "../domain/exportImport";
 import { planPackageResize, planUnitChange, type UnitChangePlan } from "../domain/units";
-import { resolveVocabValue, shoppingList, valuesInUse } from "./selectors";
+import { resolveVocabValue, valuesInUse } from "./selectors";
 import { planOrganization, planOrganizationUndo, type OrganizationChange, type OrganizationFields } from "../domain/organize";
+import { planCheckout, validShoppingAmount } from "../domain/shopping";
 
 export const COALESCE_MS = 2000;
 export const SAVE_DEBOUNCE_MS = 100;
@@ -76,6 +77,10 @@ export interface ImportOutcome {
   /** snapshot key the pre-import copy was written to */
   snapshotKey?: string;
 }
+
+export type CheckoutOutcome =
+  | { ok: true; itemCount: number; extras: ShoppingExtra[] }
+  | { ok: false; error: string };
 
 export interface Store {
   // -- reading ------------------------------------------------------------
@@ -123,12 +128,17 @@ export interface Store {
   setLadderRung(id: string, rung: LadderRung): void;
   /** Save this trip's buy amount without changing stock or its observation/history. */
   setShoppingAmount(id: string, amount: number): void;
-  /** Shopping check-off: adds the explicit, planned, or usual amount (in that order); always clears the flag. */
+  /** Stage a flagged item and capture its buy amount; no stock, flag or history changes. */
+  stageItem(id: string): boolean;
+  /** Return a staged item to To buy, keeping its amount and original flag. */
+  putBackItem(id: string): void;
+  /** Record an already completed purchase. Shopping UI stages instead and books at checkout. */
   purchase(id: string, amount?: number): void;
   /**
-   * Put back from the cart: reverse the item's most recent purchase since
-   * LOCAL midnight (the same same-day rule the inCart selector uses).
-   * Quantity returns to that purchase event's qty_before via a compensating
+   * Legacy correction of a completed purchase: reverse the item's most
+   * recent purchase since LOCAL midnight. The shopping UI uses putBackItem
+   * for pending cart selections instead, which never touches stock.
+   * The purchase delta is subtracted from current stock via a compensating
    * `recount` (note "put back", NO verified_at stamp — nothing was observed,
    * a tap was retracted), and the flag re-raises (flag_source "manual",
    * flagged_at now) so the item goes back to To Buy. Silently no-ops when
@@ -159,9 +169,8 @@ export interface Store {
       verified_at?: string | null;
     },
     opts?: {
-      /** Reversal marker for the event log (e.g. "put back" when undoing a
-       *  purchase) — the inCart selector reads it to keep a reversed
-       *  check-off out of the "In the cart" section. */
+      /** Reversal marker for the history presenter and buying rhythm
+       *  (e.g. "put back" when correcting a completed purchase). */
       note?: string;
     },
   ): void;
@@ -227,6 +236,8 @@ export interface Store {
 
   // -- shopping extras -----------------------------------------------------
   addExtra(text: string): ShoppingExtra;
+  stageExtra(id: string): boolean;
+  putBackExtra(id: string): void;
   /** Check-off = soft delete. */
   checkExtra(id: string): void;
   uncheckExtra(id: string): void;
@@ -268,13 +279,10 @@ export interface Store {
   deleteSnapshot(key: string): void;
   /** Settings edits (retention_days, device_label). */
   updateSettings(fields: Partial<Pick<AmbryDoc["settings"], "retention_days" | "device_label">>): void;
-  /** Close the current shopping trip: stamps last_trip_ended_at so the
-   *  in-cart receipt clears immediately and the next check-off opens a
-   *  fresh trip. Returns how many items were on the receipt (for the
-   *  summary toast). Purchases/quantities are untouched — they were
-   *  applied at each check-off. Completed items' planned amounts are cleared;
-   *  unbought items keep theirs. */
-  finishTrip(): number;
+  /** Book the whole staged cart in ONE synchronous save. Only a successful
+   *  save updates the running pantry; failures retain the cart for retry.
+   *  Unstaged shopping needs and their plans stay on the list. */
+  checkout(): CheckoutOutcome;
 }
 
 /**
@@ -408,15 +416,17 @@ export function createStore(
   }
 
   /**
-   * THE one commit path for every event-emitting mutation: roundQty, event
-   * append-or-coalesce, flag transition, verified_at option, updated_at,
-   * writes_since_export, notify, debounced save.
+   * Shared quantity writer for individual commands and prepared checkout:
+   * roundQty, event append-or-coalesce, flag transition and timestamps.
+   * The caller commits once, or saves a prepared checkout.
    */
-  function commitQuantity(
+  function writeQuantity(
+    targetDoc: AmbryDoc,
     item: Item,
     after: number,
     kind: EventKind,
     opts: {
+      at?: string;
       stampVerified?: boolean;
       unitBefore?: string;
       note?: string;
@@ -428,7 +438,7 @@ export function createStore(
       };
     } = {},
   ): void {
-    const at = nowFn();
+    const at = opts.at ?? nowFn();
     const before = item.quantity;
     const rounded = roundQty(after);
 
@@ -442,7 +452,7 @@ export function createStore(
 
     // Append-or-coalesce. Only the doc's very last event is a candidate:
     // any intervening event (other item, other kind) ends the burst.
-    const last = doc.events[doc.events.length - 1];
+    const last = targetDoc.events[targetDoc.events.length - 1];
     const coalescible = kind === "add" || kind === "use";
     if (
       coalescible &&
@@ -471,7 +481,7 @@ export function createStore(
       };
       if (opts.unitBefore !== undefined) event.unit_before = opts.unitBefore;
       if (opts.note !== undefined) event.note = opts.note;
-      doc.events.push(event);
+      targetDoc.events.push(event);
     }
 
     item.quantity = rounded;
@@ -500,6 +510,15 @@ export function createStore(
     // recount-family only, and NOT the undo compensator: the caller decides.
     if (opts.stampVerified === true) item.verified_at = at;
     item.updated_at = at;
+  }
+
+  function commitQuantity(
+    item: Item,
+    after: number,
+    kind: EventKind,
+    opts: Parameters<typeof writeQuantity>[4] = {},
+  ): void {
+    writeQuantity(doc, item, after, kind, opts);
     committed();
   }
 
@@ -610,6 +629,7 @@ export function createStore(
       if (item.deleted_at !== null) return;
       item.deleted_at = nowFn();
       delete item.shopping_amount;
+      delete item.carted_at;
       commitQuantity(item, item.quantity, "delete");
     },
 
@@ -654,17 +674,36 @@ export function createStore(
       committed();
     },
 
+    stageItem(id) {
+      const item = itemById(id);
+      if (item.deleted_at !== null || !item.flagged || item.carted_at !== undefined) return false;
+      const amount = item.shopping_amount ?? item.restock_amount;
+      if (!validShoppingAmount(amount)) return false;
+      const at = nowFn();
+      item.shopping_amount = roundQty(amount);
+      item.carted_at = at;
+      item.updated_at = at;
+      committed();
+      return true;
+    },
+
+    putBackItem(id) {
+      const item = itemById(id);
+      if (item.carted_at === undefined) return;
+      delete item.carted_at;
+      item.updated_at = nowFn();
+      committed();
+    },
+
     purchase(id, amount) {
       const item = itemById(id);
-      // Keep the plan until Finish trip so Undo/Put back restores the same
-      // buy amount even after navigation or a reload.
+      delete item.carted_at;
       commitQuantity(item, item.quantity + (amount ?? item.shopping_amount ?? item.restock_amount), "purchase");
     },
 
     unpurchase(id) {
       const item = itemById(id);
-      // Same "today" as the inCart selector: the shopper's LOCAL midnight,
-      // not UTC's — the two must agree on which purchases are put-backable.
+      // Legacy completed-purchase correction uses the shopper's local day.
       const midnightLocal = new Date(nowFn());
       midnightLocal.setHours(0, 0, 0, 0);
       const midnight = midnightLocal.getTime();
@@ -726,6 +765,7 @@ export function createStore(
       item.flag_source = null;
       item.flagged_at = null;
       delete item.shopping_amount;
+      delete item.carted_at;
       item.updated_at = nowFn();
       committed();
     },
@@ -780,7 +820,12 @@ export function createStore(
       // A trip amount shares the unit too. Convert when possible; otherwise
       // discard the old denomination alongside the guarded re-entry flow.
       if (shoppingPlan?.kind === "convert") item.shopping_amount = roundQty(shoppingPlan.quantity);
-      else delete item.shopping_amount;
+      else {
+        delete item.shopping_amount;
+        // No conversion means the old planned amount is no longer usable:
+        // return this need to To buy for an explicit amount in the new unit.
+        delete item.carted_at;
+      }
       commitQuantity(item, quantity, "unit_change", { unitBefore });
     },
 
@@ -840,6 +885,8 @@ export function createStore(
       loser.deleted_at = at;
       loser.merged_into = survivor.id;
       loser.updated_at = at;
+      delete loser.carted_at;
+      delete loser.shopping_amount;
 
       // One merge event, on the survivor, note = loser's name.
       commitQuantity(survivor, resolvedQty, "merge", { note: loser.name });
@@ -900,12 +947,31 @@ export function createStore(
       return extra;
     },
 
+    stageExtra(id) {
+      const extra = extraById(id);
+      if (extra.deleted_at !== null || extra.carted_at !== undefined) return false;
+      const at = nowFn();
+      extra.carted_at = at;
+      extra.updated_at = at;
+      committed();
+      return true;
+    },
+
+    putBackExtra(id) {
+      const extra = extraById(id);
+      if (extra.carted_at === undefined) return;
+      delete extra.carted_at;
+      extra.updated_at = nowFn();
+      committed();
+    },
+
     checkExtra(id) {
       const extra = extraById(id);
       if (extra.deleted_at !== null) return;
       const at = nowFn();
       extra.deleted_at = at;
       extra.updated_at = at;
+      delete extra.carted_at;
       committed();
     },
 
@@ -1020,20 +1086,56 @@ export function createStore(
       committed();
     },
 
-    finishTrip() {
-      const receipt = shoppingList(doc, nowFn()).inCart.length;
-      const at = nowFn();
-      // Unbought items keep their plans for the next visit. Completed buys
-      // return to the usual default when they next need restocking.
-      for (const item of doc.items) {
-        if (!item.flagged && item.shopping_amount !== undefined) {
-          delete item.shopping_amount;
-          item.updated_at = at;
-        }
+    checkout() {
+      let plan: ReturnType<typeof planCheckout>;
+      try {
+        plan = planCheckout(doc);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Check the cart amounts." };
       }
-      doc.settings.last_trip_ended_at = at;
-      committed();
-      return receipt;
+      if (plan.purchases.length === 0 && plan.extras.length === 0) {
+        return { ok: true, itemCount: 0, extras: [] };
+      }
+      if (!storageStillOurs()) {
+        return { ok: false, error: "This pantry changed in another tab. Reload before checkout." };
+      }
+      const at = nowFn();
+      // Prepare off to the side: observers and the persisted document must
+      // never see a partially booked cart. The common writer still owns
+      // every quantity, event, flag transition and timestamp.
+      const next = structuredClone(doc);
+      const byId = new Map(next.items.map((item) => [item.id, item]));
+      for (const purchase of plan.purchases) {
+        const item = byId.get(purchase.itemId)!;
+        writeQuantity(next, item, purchase.quantity, "purchase", { at });
+        delete item.shopping_amount;
+        delete item.carted_at;
+      }
+      const extraIds = new Set(plan.extras.map((extra) => extra.id));
+      for (const extra of next.extras) {
+        if (!extraIds.has(extra.id)) continue;
+        extra.deleted_at = at;
+        extra.updated_at = at;
+        delete extra.carted_at;
+      }
+      next.settings.last_trip_ended_at = at;
+      next.settings.writes_since_export += 1;
+      try {
+        const raw = JSON.stringify(next);
+        adapter.set(DOC_KEY, raw);
+        lastKnownRaw = raw;
+      } catch {
+        saveFailed = true;
+        notify();
+        return { ok: false, error: "Checkout could not be saved. Your cart is still here — free storage and try again." };
+      }
+      doc = next;
+      if (saveTimer !== null) clearTimeout(saveTimer);
+      saveTimer = null;
+      dirty = false;
+      saveFailed = false;
+      notify();
+      return { ok: true, itemCount: plan.purchases.length, extras: plan.extras };
     },
   };
 }

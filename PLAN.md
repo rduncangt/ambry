@@ -74,10 +74,10 @@ quantity changes, and quantity increase is explicitly disqualified as the signal
 written, the resupply model is unimplementable; you'd have hit this in week one. The fix
 is small and keeps the shopping-list-as-view decision intact:
 
-- **Check-off in the shopping view IS the purchase gesture.** One tap marks an item
-  bought: writes a `purchase` event, clears the flag, and applies the quantity change
-  (default `restock_amount`, editable inline). Zero friction beyond the post-shop update
-  you'd do anyway.
+- **Checkout IS the purchase gesture (revised 2026-09-26).** The shopping cart icon
+  stages an item without changing pantry stock. A separate **Check out** action books
+  every staged item together: writes `purchase` events, clears their flags, and adds
+  the chosen amounts. Walking the aisles must not claim the groceries are home already.
 - **Events carry a `kind`** (`purchase` / `use` / `recount` / …), inferred from the
   gesture — you are never asked to classify. A few bytes per event; a migration later
   otherwise.
@@ -147,9 +147,9 @@ iOS will kill the page between aisle 3 and aisle 7, so anything not persisted at
 time doesn't survive a shopping trip, let alone the week between typing and shopping. The
 principle survives restated as **"no duplicated ITEM state"**: list membership for
 inventory items stays purely derived from the flag; ad-hoc entries get their own minimal
-record type (UUID, text, timestamps, soft delete — your own retrofit shape). Check-off
-soft-deletes the entry, with a one-tap "add to pantry?" so one-off buys can graduate
-instead of being retyped as near-duplicates later.
+record type (UUID, text, timestamps, soft delete — your own retrofit shape). A cart tap
+stages the entry; checkout soft-deletes it and offers "add to pantry?" so one-off buys
+can graduate instead of being retyped as near-duplicates later.
 
 ### 1.7 The ladder's write direction destroys multi-container quantities — MEDIUM
 
@@ -214,6 +214,8 @@ interface Item {
   flag_source: "threshold" | "manual" | null;   // provenance survives event pruning
   flagged_at: string | null;
   restock_amount: number;        // default purchase quantity, in `unit`; default 1
+  shopping_amount?: number;     // this trip's chosen amount; absent = use the default
+  carted_at?: string;            // staged for checkout, with an explicit shopping_amount
   never_prompt: boolean;         // suppresses auto-raise ONLY; manual flag still works
 
   expiry: string | null;         // "YYYY-MM-DD"
@@ -244,7 +246,8 @@ interface ShoppingExtra {
   text: string;                  // "birthday candles"
   created_at: string;
   updated_at: string;
-  deleted_at: string | null;     // check-off = soft delete; hard-pruned after ~7 days
+  carted_at?: string;            // staged for checkout
+  deleted_at: string | null;     // checkout = soft delete; hard-pruned after ~7 days
 }
 
 interface Settings {
@@ -259,7 +262,8 @@ interface Settings {
 
 **Quantity gestures → event kinds.** Kind is inferred, never asked: stepper up → `add`,
 stepper down → `use`, absolute entry / ladder tap / audit fix → `recount`, shopping
-check-off → `purchase`. Stepper bursts debounce (~2 s settle) into one event. `recount`
+checkout → `purchase`. Staging and put-back write no quantity events. Stepper bursts
+debounce (~2 s settle) into one event. `recount`
 stamps `verified_at`. Decrement below zero writes 0.
 
 **Flags.** Inside the mutation command, on every quantity write: if
@@ -286,28 +290,39 @@ are item fields, not events — provenance survives pruning (R2).
 qty > 1 renders "Full +N". Write: rung tap = `recount` to 1.0 / 0.5 / 0.2 / 0, confirm
 required when qty > 1 (§1.7). Mapping is a code constant, not a setting.
 
-**Shopping view** = items where `flagged && !deleted_at`, plus live extras, plus — dimmed,
-as the in-cart section — items with a `purchase` event today (derived from events; no
-`in_cart` field, so mid-trip state survives page kills for free). Check-off on a flagged
-item: `purchase` event, +`restock_amount` (shown, tappable to correct — bought 2, not 1),
-flag cleared. Check-off on an extra: soft delete + optional "add to pantry?" quick-create.
-Undo toast (3 s) after every write, implemented as a compensating event — history stays
-append-only.
+**Shopping view (revised 2026-09-26)** has two distinct steps: **To buy → In the cart →
+Check out**. To buy contains flagged live items and live extras that are not staged.
+The cart icon sets optional `carted_at` on the item/extra. Item staging also captures
+the chosen `shopping_amount` (or its usual default). Pantry stock, flags, verification
+stamps, and quantity history do not change. Amounts remain editable in the cart.
+Put back and the 3-second staging Undo remove only the marker, retaining the amount
+and original flag. Cart contents persist across navigation, reopening, and midnight.
+
+**Checkout** validates the entire cart, prepares all purchases, and saves one complete
+document synchronously before publishing the new state. Each staged item gets one
+`purchase` event, its amount added to the current pantry quantity, and its flag cleared.
+Staged extras are soft-deleted and can then graduate via "add to pantry?". Completed
+staging markers and plans are cleared; unbought needs and plans stay on the list.
+Saving failures leave the cart and stock untouched for retry; another checkout on the
+empty cart is a no-op. `last_trip_ended_at` records the completed checkout.
 
 > **Revision (2026-09-13).** Shopping amount edits persist immediately through the
 > store in optional `Item.shopping_amount` (same unit as quantity), rather than
 > component state that resets on navigation or reopening. Missing means use
 > `restock_amount`; the “Usually buy” default stays separate. Editing the plan
-> changes no stock, flags, observation stamp, or history. Purchase uses the plan
-> and keeps it for Undo/Put back. Finish trip clears completed items' plans while
+> changes no stock, flags, observation stamp, or history. Staging uses the plan
+> and keeps it for Undo/Put back. Checkout clears completed items' plans while
 > unbought items retain theirs; explicit removal/deletion discards the plan.
 > Unit/package conversions also convert the plan, or discard it when the guarded
-> unit flow requires re-entry. Existing v1 backups need no new required field.
+> unit flow requires re-entry (also returning that item to To buy for restaging).
+> Existing v1 backups need no new required field.
 
 > **Revision (2026-09-17).** Shopping cards label current stock “Have” and
-> the planned purchase “Buy”. The cart shows unreversed purchase totals for
-> the active trip, using each event's recorded unit, beside current stock.
-> Repeated purchases are summed only within the same unit.
+> the planned purchase “Buy”. As of 2026-09-26, pending cart amounts are labelled
+> “In cart”, beside unchanged “Have” stock. Existing purchase events are already
+> completed purchases: loading/importing an older backup never stages or rebooks
+> them. Optional staging markers keep old v1 backups compatible without a schema
+> migration; malformed markers return to the ordinary list without changing stock.
 
 **Bulk organization (2026-09-17).** Pantry → Organize items selects live items
 by search/location, then applies location and/or category in one store commit.
@@ -505,8 +520,9 @@ full pantry yet.
 ### M2 — Resupply and the shop round-trip (~1–2 weeks of evenings)
 
 Thresholds (rung-picked for ladder items); edge-triggered auto-raise; sticky
-purchase-clear + manual clear; `never_prompt`; shopping view (flagged + extras + today's
-purchases dimmed); one-tap bought with editable amount; extras with promote-to-item.
+purchase-clear + manual clear; `never_prompt`; shopping view (To buy + extras + pending
+cart); one-tap staging with editable amounts, then explicit checkout; extras with
+promote-to-item after checkout.
 
 **Exit:** one real supermarket trip round-trips — flag at home, buy, check off in the
 aisle — in under 2 minutes of total app interaction.
@@ -571,4 +587,3 @@ adapter.
    it's a one-field addition. Defer or include now: your call.
 5. **Expiry depth**: plan ships badge + filter only. If you find you never enter expiry
    dates by end of M3, drop the field from the edit form and keep it schema-only.
-

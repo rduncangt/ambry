@@ -225,6 +225,47 @@ describe("migrateDoc — declared_locations coercion", () => {
   });
 });
 
+describe("migrateDoc — optional pending carts", () => {
+  const at = "2026-09-26T12:00:00.000Z";
+  const staged = { id: "beans", flagged: true, deleted_at: null, quantity: 3, shopping_amount: 2, carted_at: at };
+
+  it("preserves valid item and extra staging without a schema bump or stock change", () => {
+    const raw = validRaw({ items: [staged], extras: [{ id: "candles", deleted_at: null, carted_at: at }] });
+    expect(migrateDoc(raw)).toBe(raw);
+    expect(migrateDoc(raw).items[0]?.quantity).toBe(3);
+  });
+
+  it("never derives a pending cart from legacy purchases", () => {
+    const raw = validRaw({ items: [{ id: "beans", flagged: false, deleted_at: null, quantity: 33 }],
+      events: [{ item_id: "beans", kind: "purchase", qty_before: 3, qty_after: 33, at }] });
+    expect(migrateDoc(raw).items[0]?.carted_at).toBeUndefined();
+    expect(migrateDoc(raw).items[0]?.quantity).toBe(33);
+  });
+
+  it.each([
+    { carted_at: "garbage" }, { carted_at: null }, { carted_at: 12 },
+    { flagged: false }, { deleted_at: at }, { shopping_amount: undefined },
+    { shopping_amount: "2" }, { shopping_amount: Number.MAX_VALUE },
+  ])("returns malformed staged items to the list without changing their stock: %j", (patch) => {
+    const raw = validRaw({ items: [{ ...staged, ...patch }] });
+    const before = structuredClone(raw);
+    const result = migrateDoc(raw);
+    expect(result.items[0]?.carted_at).toBeUndefined();
+    expect(result.items[0]?.quantity).toBe(3);
+    expect(raw).toEqual(before);
+  });
+
+  it("cleans bad or deleted extra staging without mutating the backup", () => {
+    const raw = validRaw({ extras: [
+      { id: "bad", deleted_at: null, carted_at: "yesterday" },
+      { id: "deleted", deleted_at: at, carted_at: at },
+    ] });
+    const before = structuredClone(raw);
+    expect(migrateDoc(raw).extras.every((extra) => extra.carted_at === undefined)).toBe(true);
+    expect(raw).toEqual(before);
+  });
+});
+
 describe("migrateDoc — older versions run forward through MIGRATIONS", () => {
   it("applies each rung in order and stamps the final version", () => {
     const applied: number[] = [];
