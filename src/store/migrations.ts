@@ -4,6 +4,7 @@
  * imports cleanly into the 2030 app. NEVER delete a migration function.
  */
 import { DEFAULT_RETENTION_DAYS, SCHEMA_VERSION, type AmbryDoc } from "../types";
+import { validShoppingAmount } from "../domain/shopping";
 
 export class NewerSchemaError extends Error {
   constructor(public fileVersion: number) {
@@ -87,17 +88,36 @@ export function migrateDoc(raw: unknown): AmbryDoc {
   // hand-edited backup falls back to the usual amount, never string-adds a
   // purchase or injects NaN. Preserve all other fields and caller identity
   // when nothing needs cleaning.
+  const validCartStamp = (v: unknown): boolean => typeof v === "string" && Number.isFinite(Date.parse(v));
   let cleanedPlans = false;
   const items = (doc.items as unknown[]).map((item) => {
-    if (!isPlainObject(item) || !("shopping_amount" in item)) return item;
-    const amount = item.shopping_amount;
-    if (typeof amount === "number" && Number.isFinite(amount) && amount >= 0) return item;
+    if (!isPlainObject(item)) return item;
+    const badPlan = "shopping_amount" in item && !validShoppingAmount(item.shopping_amount);
+    const badCart = "carted_at" in item && (
+      !validCartStamp(item.carted_at) || item.deleted_at !== null || item.flagged !== true ||
+      !validShoppingAmount(item.shopping_amount)
+    );
+    if (!badPlan && !badCart) return item;
     const copy = { ...item };
-    delete copy.shopping_amount;
+    if (badPlan) delete copy.shopping_amount;
+    if (badCart) delete copy.carted_at;
     cleanedPlans = true;
     return copy;
   });
   if (cleanedPlans) doc = { ...doc, items };
+
+  // Older backups contain completed purchases, never pending carts. Only
+  // explicit, valid staging markers survive; history never invents one.
+  let cleanedExtras = false;
+  const extras = (doc.extras as unknown[]).map((extra) => {
+    if (!isPlainObject(extra) || !("carted_at" in extra) ||
+      (validCartStamp(extra.carted_at) && extra.deleted_at === null)) return extra;
+    const copy = { ...extra };
+    delete copy.carted_at;
+    cleanedExtras = true;
+    return copy;
+  });
+  if (cleanedExtras) doc = { ...doc, extras };
 
   // Coerce the settings numerics arithmetic depends on. A hand-edited backup
   // with a missing or garbage retention_days would make pruneDoc's cutoff

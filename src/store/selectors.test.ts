@@ -146,82 +146,52 @@ describe("shoppingList — extras", () => {
   });
 });
 
-describe("shoppingList — inCart (purchases since LOCAL midnight)", () => {
-  const midnight = localMidnightMs(NOW);
-
-  it("includes an item purchased after local midnight, excludes one before", () => {
-    const bought = makeItem();
-    const yesterday = makeItem();
-    const doc = makeDoc({
-      items: [bought, yesterday],
-      events: [
-        makeEvent({ item_id: bought.id, at: new Date(midnight + 3_600_000).toISOString() }),
-        makeEvent({ item_id: yesterday.id, at: new Date(midnight - 3_600_000).toISOString() }),
-      ],
-    });
-    expect(shoppingList(doc, NOW).inCart).toEqual([bought]);
+describe("shoppingList — staged cart", () => {
+  it("splits flagged items between To buy and the cart in staging order", () => {
+    const first = makeItem({ flagged: true, carted_at: "2026-08-20T12:00:00.000Z", shopping_amount: 2 });
+    const second = makeItem({ flagged: true, carted_at: NOW, shopping_amount: 5 });
+    const unpicked = makeItem({ flagged: true });
+    const doc = makeDoc({ items: [second, unpicked, first] });
+    expect(shoppingList(doc, NOW).toBuy).toEqual([unpicked]);
+    expect(shoppingList(doc, NOW).inCart).toEqual([first, second]);
   });
 
-  it("a purchase exactly AT local midnight counts as today", () => {
-    const item = makeItem();
-    const doc = makeDoc({
-      items: [item],
-      events: [makeEvent({ item_id: item.id, at: new Date(midnight).toISOString() })],
-    });
+  it("keeps a pending cart across midnight and after an old trip-end stamp", () => {
+    const item = makeItem({ flagged: true, carted_at: "2026-08-01T12:00:00.000Z", shopping_amount: 3 });
+    const doc = makeDoc({ items: [item] });
+    doc.settings.last_trip_ended_at = NOW;
     expect(shoppingList(doc, NOW).inCart).toEqual([item]);
+    expect(shoppingList(doc, "2026-08-28T12:00:00.000Z").inCart).toEqual([item]);
   });
 
-  it("ignores non-purchase events and dedupes repeat purchases", () => {
+  it("never stages a purchase from history, including repeat purchases", () => {
     const item = makeItem();
-    const other = makeItem();
-    const doc = makeDoc({
-      items: [item, other],
-      events: [
-        makeEvent({ item_id: other.id, kind: "recount", at: new Date(midnight + 1000).toISOString() }),
-        makeEvent({ item_id: item.id, at: new Date(midnight + 2000).toISOString() }),
-        makeEvent({ item_id: item.id, at: new Date(midnight + 3000).toISOString() }), // went back for one more
-      ],
-    });
-    expect(shoppingList(doc, NOW).inCart).toEqual([item]);
-  });
-
-  it("excludes items deleted after purchase and events for vanished items", () => {
-    const deleted = makeItem({ deleted_at: NOW });
-    const doc = makeDoc({
-      items: [deleted],
-      events: [
-        makeEvent({ item_id: deleted.id, at: new Date(midnight + 1000).toISOString() }),
-        makeEvent({ item_id: "no-such-item", at: new Date(midnight + 2000).toISOString() }),
-      ],
-    });
+    const doc = makeDoc({ items: [item], events: [
+      makeEvent({ item_id: item.id, at: NOW }),
+      makeEvent({ item_id: item.id, at: NOW }),
+    ] });
     expect(shoppingList(doc, NOW).inCart).toEqual([]);
   });
 
-  it("excludes a currently-flagged item — a put-back row lives in To Buy only", () => {
-    // unpurchase re-raises the flag; the row must move back to To Buy whole,
-    // never sit in both sections at once.
-    const putBack = makeItem({ flagged: true, flagged_at: NOW });
-    const kept = makeItem();
-    const doc = makeDoc({
-      items: [putBack, kept],
-      events: [
-        makeEvent({ item_id: putBack.id, at: new Date(midnight + 1000).toISOString() }),
-        makeEvent({ item_id: kept.id, at: new Date(midnight + 2000).toISOString() }),
-      ],
-    });
-    const list = shoppingList(doc, NOW);
-    expect(list.inCart).toEqual([kept]);
-    expect(list.toBuy).toEqual([putBack]);
+  it("excludes deleted and unflagged items even if a stale marker remains", () => {
+    const deleted = makeItem({ flagged: true, carted_at: NOW, shopping_amount: 1, deleted_at: NOW });
+    const unflagged = makeItem({ carted_at: NOW, shopping_amount: 1 });
+    expect(shoppingList(makeDoc({ items: [deleted, unflagged] }), NOW).inCart).toEqual([]);
   });
 
-  it("mid-trip state is purely derived: same doc, same list (no stored in_cart)", () => {
-    const item = makeItem();
-    const doc = makeDoc({
-      items: [item],
-      events: [makeEvent({ item_id: item.id, at: new Date(midnight + 1000).toISOString() })],
-    });
-    // Two independent evaluations (a "page kill" is just re-derivation).
-    expect(shoppingList(doc, NOW)).toEqual(shoppingList(doc, NOW));
+  it("separates staged extras from unpicked extras and excludes deleted ones", () => {
+    const pending = makeExtra();
+    const staged = makeExtra({ carted_at: NOW });
+    const deleted = makeExtra({ carted_at: NOW, deleted_at: NOW });
+    const list = shoppingList(makeDoc({ extras: [deleted, staged, pending] }));
+    expect(list.extras).toEqual([pending]);
+    expect(list.cartExtras).toEqual([staged]);
+  });
+
+  it("re-derives the same cart from a saved document without depending on events", () => {
+    const item = makeItem({ flagged: true, carted_at: NOW, shopping_amount: 2 });
+    const doc = makeDoc({ items: [item] });
+    expect(shoppingList(JSON.parse(JSON.stringify(doc)))).toEqual(shoppingList(doc));
   });
 });
 
@@ -740,7 +710,7 @@ describe("purchaseRhythm", () => {
   });
 });
 
-describe("inCart is reversal-aware", () => {
+describe("purchase history never creates pending cart contents", () => {
   it("a Put back followed by a later flag-clear does not resurface the item in the cart", () => {
     const adapter = memoryAdapter();
     const store = createStore(adapter);
@@ -767,14 +737,18 @@ describe("inCart is reversal-aware", () => {
     expect(list.inCart).toEqual([]);
   });
 
-  it("an unreversed purchase still shows in the cart once its flag is gone", () => {
+  it("an unreversed purchase stays out of the cart until explicitly staged again", () => {
     const adapter = memoryAdapter();
     const store = createStore(adapter);
     const item = store.createItem({ name: "Bread", quantity: 0 });
     store.flagManual(item.id);
     store.purchase(item.id, 2); // bought: flag clears, quantity 2
     const list = shoppingList(store.getDoc(), new Date().toISOString());
-    expect(list.inCart.map((i) => i.name)).toEqual(["Bread"]);
+    expect(list.inCart).toEqual([]);
+    store.flagManual(item.id);
+    store.stageItem(item.id);
+    expect(shoppingList(store.getDoc()).inCart.map((i) => i.name)).toEqual(["Bread"]);
+    expect(item.quantity).toBe(2);
   });
 });
 
