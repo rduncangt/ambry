@@ -54,29 +54,27 @@ describe("shopping amounts", () => {
     expect(reopened.getDoc().items.map((i) => i.quantity)).toEqual([33, 10]);
   });
 
-  it("keeps the plan for put-back and undo, then resets completed buys at Finish trip", () => {
+  it("keeps plans for staging undo and put-back, resetting only checked-out items", () => {
     const { store, item } = setup();
     const unbought = store.createItem({ name: "Mango Cup" });
     store.flagManual(unbought.id);
     store.setShoppingAmount(unbought.id, 8);
     store.setShoppingAmount(item.id, 30);
-    const before = { ...item };
-    store.purchase(item.id);
-    store.undoQuantity(item.id, before.quantity, before, { note: "put back" });
+    store.stageItem(item.id);
+    store.putBackItem(item.id);
     expect(item.shopping_amount).toBe(30);
     expect(item.flagged).toBe(true);
-    store.purchase(item.id);
-    expect(store.unpurchase(item.id)).toBe(true);
     expect(item.quantity).toBe(3);
-    expect(item.shopping_amount).toBe(30);
-    store.purchase(item.id);
-    store.finishTrip();
-    expect(item.shopping_amount).toBeUndefined();
-    expect(unbought.shopping_amount).toBe(8);
-    expect(item.quantity).toBe(33);
+    store.stageItem(item.id);
+    store.checkout();
+    const bought = store.getDoc().items.find((i) => i.id === item.id)!;
+    expect(bought.shopping_amount).toBeUndefined();
+    expect(store.getDoc().items.find((i) => i.id === unbought.id)?.shopping_amount).toBe(8);
+    expect(bought.quantity).toBe(33);
     store.flagManual(item.id);
-    store.purchase(item.id);
-    expect(item.quantity).toBe(34); // next trip uses Usually buy again
+    store.stageItem(item.id);
+    store.checkout();
+    expect(store.getDoc().items.find((i) => i.id === item.id)?.quantity).toBe(34);
     store.flush();
   });
 

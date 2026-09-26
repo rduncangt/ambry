@@ -1,22 +1,8 @@
-/**
- * Shopping view (PLAN.md §2 "Shopping view"; M2 flow (b): a 20-item restock
- * in under 2 minutes). Three sections, all derived by the shoppingList
- * selector — list membership is never stored here (§1.6):
- *   TO BUY  — flagged items in store-aisle order (grouped by category,
- *             alphabetical within); ONE big check-off per row IS the
- *             purchase gesture (§1.2), with the amount correctable first.
- *   EXTRAS  — live ad-hoc lines; check-off soft-deletes and offers one-shot
- *             graduation to a real pantry item.
- *   IN THE CART — today's purchases, dimmed (derived from events, so
- *             mid-trip state survives page kills for free), each with a
- *             "Put back" escape hatch for mistaps noticed after the undo
- *             toast is gone: store.unpurchase reverses the purchase and
- *             re-raises the flag, moving the row back to To Buy.
- * All writes go through Store commands (AGENTS.md rule 1).
- */
+/** Shopping is two steps: stage what is in the cart, then check out.
+ *  Staging, amount edits and put-back never change pantry stock or history.
+ *  The saved cart survives navigation, app restarts and overnight trips. */
 import { useState } from "preact/hooks";
-import { fmtAge, fmtLevel, fmtQty, fmtQtyUnit, isUncounted, parseDec, fmtAgeShort } from "../../domain/format";
-import type { PurchaseAmount } from "../../domain/purchases";
+import { fmtAge, fmtAgeShort, fmtLevel, fmtQty, isUncounted, parseDec } from "../../domain/format";
 import { groupByCategory, shoppingList } from "../../store/selectors";
 import { now, type Item, type ShoppingExtra } from "../../types";
 import { CartMinusIcon, CartPlusIcon, InlineQtyInput, qtyLines, Stepper, TrashIcon } from "../components";
@@ -27,45 +13,40 @@ export function ShoppingView() {
   const doc = useDoc();
   const store = useStore();
   const toast = useToast();
+  const nav = useNav();
+  const [error, setError] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<ShoppingExtra[]>([]);
   const nowIso = now();
-  const list = shoppingList(doc, nowIso);
+  const list = shoppingList(doc);
+  const cartCount = list.inCart.length + list.cartExtras.length;
+
+  const checkout = (): void => {
+    const result = store.checkout();
+    if (!result.ok) { setError(result.error); return; }
+    setError(null);
+    const count = result.itemCount + result.extras.length;
+    if (count === 0) return;
+    setPrompts((old) => [...old, ...result.extras]);
+    toast(`Checked out ${count} ${count === 1 ? "item" : "items"}${result.itemCount > 0 ? " — pantry updated" : ""}`);
+  };
 
   return (
     <section class="view">
-      {/* Sticky like Pantry's header: the notice pill docks top-right, and
-          without an opaque band it would sit on the first card's trash
-          button — its Undo hit box overlapping a control is exactly what
-          the tap-through contract promises never happens. */}
-      <header class="sticky-head">
-        <h1 class="view-title">Shopping</h1>
-      </header>
-
+      <header class="sticky-head"><h1 class="view-title">Shopping</h1></header>
       {list.toBuy.length === 0 ? (
         <p class="shop-empty">
-          Nothing flagged — the pantry view raises flags when things run low.
+          {cartCount > 0 ? "No pantry items left to pick up — review your cart below." :
+            "Nothing flagged — the pantry view raises flags when things run low."}
         </p>
       ) : (
         <div class="shop-section">
           <h2 class="shop-section-title">To buy</h2>
-          {/* Store-aisle order: grouped under muted category headers,
-              alphabetical within — the walk goes shelf by shelf, so aisle
-              adjacency beats flag age here. When nothing is categorized
-              there is only the null bucket: a lone "other" header over the
-              whole list would be noise, so it renders headerless. The ""
-              key is collision-free: blank categories fold into the null
-              bucket, so no real group's category can be "". */}
           {groupByCategory(list.toBuy).map((group, _, groups) => (
             <div key={group.category ?? ""} class="shop-cat">
               {(groups.length > 1 || group.category !== null) && (
                 <h3 class="shop-cat-title">{group.category ?? "other"}</h3>
               )}
-              {group.items.map((item) => (
-                <ToBuyRow
-                  key={item.id}
-                  item={item}
-                  nowIso={nowIso}
-                />
-              ))}
+              {group.items.map((item) => <ToBuyRow key={item.id} item={item} nowIso={nowIso} />)}
             </div>
           ))}
         </div>
@@ -73,218 +54,128 @@ export function ShoppingView() {
 
       <ExtrasSection extras={list.extras} />
 
-      {list.inCart.length > 0 && (
+      {cartCount > 0 && (
         <div class="shop-section">
           <h2 class="shop-section-title">In the cart</h2>
-          <p class="shop-section-sub">checked off this trip</p>
-          {list.inCart.map((item) => (
-            <InCartRow key={item.id} item={item} bought={list.cartAmounts.get(item.id) ?? []} />
-          ))}
-          {/* The trip's closing verb. Quantities and flags were applied at
-              each check-off — this clears the receipt, stamps the trip, and
-              hands the moment to the export banner if one is due. */}
-          <button
-            class="btn shop-finish"
-            type="button"
-            onClick={() => {
-              const n = store.finishTrip();
-              toast(
-                n === 1
-                  ? "Trip finished — 1 item into the pantry"
-                  : `Trip finished — ${n} items into the pantry`,
-              );
-            }}
-          >
-            Finish trip
+          <p class="shop-section-sub">Review, then check out to update your pantry.</p>
+          {list.inCart.map((item) => <InCartRow key={item.id} item={item} />)}
+          {list.cartExtras.map((extra) => <ExtraCartRow key={extra.id} extra={extra} />)}
+          <button class="btn btn-primary shop-finish" type="button" onClick={checkout}>
+            Check out ({cartCount})
           </button>
         </div>
       )}
+      {error !== null && <p class="settings-error" role="alert">{error}</p>}
+
+      {/* Extras graduate only after they have actually been purchased. */}
+      {prompts.map((extra) => (
+        <div key={extra.id} class="shop-prompt" role="status">
+          <span class="shop-prompt-text">Add “{extra.text}” to the pantry?</span>
+          <button class="btn" type="button" onClick={() => {
+            nav.openCreate(extra.text);
+            setPrompts((old) => old.filter((x) => x.id !== extra.id));
+          }}>Add</button>
+          <button class="shop-quiet" type="button" aria-label="Dismiss" onClick={() =>
+            setPrompts((old) => old.filter((x) => x.id !== extra.id))}>✕</button>
+        </div>
+      ))}
     </section>
   );
 }
 
-// ---------------------------------------------------------------------------
-// IN THE CART row — dimmed confirmation with the put-back escape hatch
-// ---------------------------------------------------------------------------
-
-function InCartRow(props: { item: Item; bought: PurchaseAmount[] }) {
+/** The same persisted amount is editable both before and after staging. */
+function BuyAmount(props: { item: Item; label: string }) {
   const store = useStore();
-  const toast = useToast();
-  const nav = useNav();
-  const item = props.item;
-
-  const putBack = (): void => {
-    // Mistap noticed after the 3 s undo toast: unpurchase reverses the
-    // purchase and re-raises the flag, so the row returns to To Buy.
-    // It refuses across midnight (a stale tab can display yesterday's
-    // purchases) — the toast must not claim a reversal that didn't happen.
-    if (store.unpurchase(item.id)) {
-      toast(`${item.name} put back — ${fmtLevel(item)}`);
-    } else {
-      toast(`${item.name} was bought yesterday — nothing to put back`);
-    }
-  };
-
-  // Same two-deck card as To Buy, one deck deep: identity left, and in the
-  // check-off's right column its mirror — cart-minus takes the row back out
-  // of the cart from the exact spot cart-plus put it in. No decorative
-  // "in cart" mark: inside this section it would only restate the header.
+  const [entering, setEntering] = useState(false);
+  const amount = props.item.shopping_amount ?? props.item.restock_amount;
+  const lines = qtyLines(amount, props.item.unit);
   return (
-    <div class="shop-card shop-cart-row">
-      <div class="shop-card-top">
-        <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
-          <div class="row-title">{item.name}</div>
-          <div class="row-sub">Bought {props.bought.map((p) => fmtQtyUnit(p.amount, p.unit)).join(" + ")}</div>
-          <div class="row-sub">Now have {fmtLevel(item)}</div>
-        </button>
-        <button
-          class="shop-check shop-check-remove"
-          type="button"
-          aria-label={`Put ${item.name} back — remove from cart`}
-          onClick={putBack}
-        >
-          <CartMinusIcon />
-        </button>
-      </div>
+    <div class="shop-buy-amount">
+      <span class="shop-buy-label">{props.label}</span>
+      {entering ? (
+        <InlineQtyInput initial={fmtQty(amount)} onDone={(raw) => {
+          setEntering(false);
+          if (raw === null) return;
+          const n = parseDec(raw);
+          if (n !== null) store.setShoppingAmount(props.item.id, n);
+        }} />
+      ) : (
+        <span class="shop-stepper">
+          <Stepper value={lines.num} unit={lines.unit}
+            valueTitle="Amount to buy — tap to type an exact amount"
+            onDelta={(d) => store.setShoppingAmount(props.item.id, Math.max(0, amount + d))}
+            onTapValue={() => setEntering(true)} />
+        </span>
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// TO BUY row — the one-big-tap purchase gesture
-// ---------------------------------------------------------------------------
+function stockCaption(item: Item): string {
+  return isUncounted(item) ? "Have: not counted" : `Have: ${fmtLevel(item)}`;
+}
 
-function ToBuyRow(props: {
-  item: Item;
-  nowIso: string;
-}) {
+function InCartRow(props: { item: Item }) {
   const store = useStore();
   const toast = useToast();
   const nav = useNav();
   const item = props.item;
-  // The plan belongs to the saved item: remounting this view or reopening
-  // the app must not silently replace it with the usual restock default.
-  const pending = item.shopping_amount ?? item.restock_amount;
+  return (
+    <div class="shop-card">
+      <div class="shop-card-top">
+        <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
+          <div class="row-title">{item.name}</div>
+          <div class="row-sub">{stockCaption(item)}</div>
+        </button>
+        <button class="shop-check shop-check-remove" type="button"
+          aria-label={`Put ${item.name} back — remove from cart`} onClick={() => {
+            store.putBackItem(item.id);
+            toast(`${item.name} put back`, () => { store.stageItem(item.id); });
+          }}><CartMinusIcon /></button>
+      </div>
+      <div class="shop-card-acts"><BuyAmount item={item} label="In cart" /></div>
+    </div>
+  );
+}
 
-  const [entering, setEntering] = useState(false); // decimal entry open
-
-  // Label pantry stock explicitly so it cannot be confused with the buy
-  // amount. Unknown stock stays unknown; flag provenance lives on the item page.
-  const caption = isUncounted(item) ? "Have: not counted" : `Have: ${fmtLevel(item)}`;
-  // List-age lives in a compact corner chip ("3d"), not a caption sentence —
-  // scannable down the whole list at a glance; the full wording rides the
-  // title attribute for anyone who presses in.
+function ToBuyRow(props: { item: Item; nowIso: string }) {
+  const store = useStore();
+  const toast = useToast();
+  const nav = useNav();
+  const item = props.item;
   const age = item.flagged_at === null ? null : fmtAgeShort(item.flagged_at, props.nowIso);
-
-  const buy = (): void => {
-    // Capture the flag triple BEFORE the write: purchase always clears the
-    // flag, and the compensating recount cannot re-derive a manual flag (or
-    // a flag raised exactly ON the threshold boundary) from the quantity
-    // move alone — undoing a mistap must put the row back on the list.
-    const flagsBefore = {
-      flagged: item.flagged,
-      flag_source: item.flag_source,
-      flagged_at: item.flagged_at,
-      verified_at: item.verified_at,
-    };
-    store.purchase(item.id);
-    // QtyControl's toast pattern: the store mutated `item` in place, so
-    // reading it again gives the post-write state; purchase is a gesture
-    // kind, so lastQuantityWrite() feeds the compensating undo.
-    const last = store.lastQuantityWrite();
-    const message = `Bought ${item.name} — now have ${fmtLevel(item)}`;
-    if (last === null) toast(message);
-    else
-      toast(message, () =>
-        // note "put back": marks the reversal so the inCart selector knows
-        // this check-off was retracted (same marker the Put back action uses).
-        store.undoQuantity(last.itemId, last.qtyBefore, flagsBefore, { note: "put back" }),
-      );
+  const stage = (): void => {
+    if (!store.stageItem(item.id)) {
+      toast("Check the buy amount before adding this item to the cart");
+      return;
+    }
+    toast(`${item.name} added to cart`, () => store.putBackItem(item.id));
   };
-
   const removeFromList = (): void => {
-    // PLAN.md §1.2 fix 4: the flag path that never ends in a purchase.
-    // Action language, not state language — the button removes the item
-    // from the list; whether there is "plenty" is not its claim to make.
     const planned = item.shopping_amount;
     store.clearFlag(item.id);
-    // Undo re-raises manually — provenance becomes "manual"/now, which is
-    // honest: the re-raise IS a fresh human decision.
     toast(`${item.name}: removed from list`, () => {
       store.flagManual(item.id);
       if (planned !== undefined) store.setShoppingAmount(item.id, planned);
     });
   };
-
-  // ALWAYS-VISIBLE compact stepper: realizing mid-aisle that it's 3 tubs,
-  // not 1, must not need a trip back to the pantry view — or even an extra
-  // tap to reveal the control. Steps by 1, floor 0 (0 = check-off clears the
-  // flag without adding stock — already legal); tapping the value opens
-  // decimal entry. Quieter than the cart button on purpose: correcting the
-  // amount is secondary to the purchase gesture itself.
-  const amount = entering ? (
-    <InlineQtyInput
-      initial={fmtQty(pending)}
-      onDone={(raw) => {
-        setEntering(false);
-        if (raw === null) return;
-        // parseDec rejects blank/garbage/negative — any of those leaves
-        // the pending amount unchanged (the store rounds on the write).
-        const n = parseDec(raw);
-        if (n !== null) store.setShoppingAmount(item.id, n);
-      }}
-    />
-  ) : (
-    <span class="shop-stepper">
-      <Stepper
-        value={qtyLines(pending, item.unit).num}
-        unit={qtyLines(pending, item.unit).unit}
-        valueTitle="Amount to buy — tap to type an exact amount"
-        onDelta={(d) => store.setShoppingAmount(item.id, Math.max(0, pending + d))}
-        onTapValue={() => setEntering(true)}
-      />
-    </span>
-  );
-
-  // Two decks: deck 1 is identity (name + caption, the quiet remove in the
-  // corner), deck 2 is action (amount capsule left, THE check-off right) —
-  // reading and deciding happen on one line, acting on the next.
   return (
     <div class="shop-card">
       <div class="shop-card-top">
-        {/* The name is a door: units wrong, threshold off — fix it on the
-            item page and the overlay's back drops you right back here. */}
         <button class="shop-card-main shop-open" type="button" onClick={() => nav.openItem(item.id)}>
           <div class="row-title">{item.name}</div>
           <div class="row-sub">
-            {caption}
-            {age !== null && (
-              // In the caption line, a card-width away from the trash — it
-              // looked like a button in the corner and invited fat-fingered
-              // deletes. Tapping it is tapping the name: the item page.
-              <span class="shop-age" title={`On the list ${fmtAge(item.flagged_at ?? "", props.nowIso)}`}>
-                {age}
-              </span>
-            )}
+            {stockCaption(item)}
+            {age !== null && <span class="shop-age" title={`On the list ${fmtAge(item.flagged_at, props.nowIso)}`}>{age}</span>}
           </div>
         </button>
-        <button
-          class="shop-trash"
-          type="button"
-          aria-label="Remove from list"
-          onClick={removeFromList}
-        >
+        <button class="shop-trash" type="button" aria-label="Remove from list" onClick={removeFromList}>
           <TrashIcon />
         </button>
       </div>
       <div class="shop-card-acts">
-        <div class="shop-buy-amount"><span class="shop-buy-label">Buy</span>{amount}</div>
-        <button
-          class="shop-check shop-check-add"
-          type="button"
-          aria-label={`Add ${item.name} to cart`}
-          onClick={buy}
-        >
+        <BuyAmount item={item} label="Buy" />
+        <button class="shop-check shop-check-add" type="button" aria-label={`Add ${item.name} to cart`} onClick={stage}>
           <CartPlusIcon />
         </button>
       </div>
@@ -292,99 +183,52 @@ function ToBuyRow(props: {
   );
 }
 
-// ---------------------------------------------------------------------------
-// EXTRAS — ad-hoc lines with one-shot promote-to-item
-// ---------------------------------------------------------------------------
+function ExtraCartRow(props: { extra: ShoppingExtra }) {
+  const store = useStore();
+  const toast = useToast();
+  const extra = props.extra;
+  return (
+    <div class="shop-card">
+      <div class="shop-card-top shop-card-center">
+        <div class="shop-card-main"><div class="row-title">{extra.text}</div></div>
+        <button class="shop-check shop-check-remove" type="button"
+          aria-label={`Put ${extra.text} back — remove from cart`} onClick={() => {
+            store.putBackExtra(extra.id);
+            toast(`${extra.text} put back`, () => { store.stageExtra(extra.id); });
+          }}><CartMinusIcon /></button>
+      </div>
+    </div>
+  );
+}
 
 function ExtrasSection(props: { extras: ShoppingExtra[] }) {
   const store = useStore();
-  const nav = useNav();
   const toast = useToast();
   const [text, setText] = useState("");
-  // One-shot promote prompt (PLAN.md §1.6): the last checked-off extra offers
-  // graduation to a real item so one-off buys aren't retyped as
-  // near-duplicates later. A newer check-off replaces it; the toast owns
-  // undo, so this lives inline rather than competing for the single toast.
-  const [prompt, setPrompt] = useState<{ id: string; text: string } | null>(null);
-
-  const check = (extra: ShoppingExtra): void => {
-    store.checkExtra(extra.id);
-    setPrompt({ id: extra.id, text: extra.text });
-    toast(`Got ${extra.text}`, () => {
-      store.uncheckExtra(extra.id);
-      // Back on the list — offering to add it to the pantry now would be
-      // premature noise.
-      setPrompt((p) => (p !== null && p.id === extra.id ? null : p));
-    });
-  };
-
-  const add = (e: Event): void => {
-    e.preventDefault();
-    const trimmed = text.trim();
-    if (trimmed === "") return;
-    store.addExtra(trimmed);
-    setText("");
-  };
-
   return (
     <div class="shop-section">
       <h2 class="shop-section-title">Extras</h2>
       {props.extras.map((extra) => (
-        // Same card rhythm as To Buy, one deck: an extra has no amount or
-        // caption, so the cart button sits directly on the name line's
-        // right column.
         <div key={extra.id} class="shop-card">
           <div class="shop-card-top shop-card-center">
-            <div class="shop-card-main">
-              <div class="row-title">{extra.text}</div>
-            </div>
-            <button
-              class="shop-check shop-check-add"
-              type="button"
-              aria-label={`Got ${extra.text}`}
-              onClick={() => check(extra)}
-            >
-              <CartPlusIcon />
-            </button>
+            <div class="shop-card-main"><div class="row-title">{extra.text}</div></div>
+            <button class="shop-check shop-check-add" type="button" aria-label={`Add ${extra.text} to cart`} onClick={() => {
+              if (store.stageExtra(extra.id)) toast(`${extra.text} added to cart`, () => store.putBackExtra(extra.id));
+            }}><CartPlusIcon /></button>
           </div>
         </div>
       ))}
-      {prompt !== null && (
-        <div class="shop-prompt" role="status">
-          <span class="shop-prompt-text">Add “{prompt.text}” to the pantry?</span>
-          <button
-            class="btn"
-            type="button"
-            onClick={() => {
-              nav.openCreate(prompt.text);
-              setPrompt(null);
-            }}
-          >
-            Add
-          </button>
-          <button
-            class="shop-quiet"
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setPrompt(null)}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      <form class="shop-add" onSubmit={add}>
-        <input
-          class="field-input"
-          type="text"
-          autocomplete="off"
-          placeholder="Add extra — e.g. birthday candles"
-          aria-label="Add extra"
-          value={text}
-          onInput={(e) => setText(e.currentTarget.value)}
-        />
-        <button class="btn" type="submit">
-          Add
-        </button>
+      <form class="shop-add" onSubmit={(e) => {
+        e.preventDefault();
+        const trimmed = text.trim();
+        if (trimmed === "") return;
+        store.addExtra(trimmed);
+        setText("");
+      }}>
+        <input class="field-input" type="text" autocomplete="off"
+          placeholder="Add extra — e.g. birthday candles" aria-label="Add extra"
+          value={text} onInput={(e) => setText(e.currentTarget.value)} />
+        <button class="btn" type="submit">Add</button>
       </form>
     </div>
   );

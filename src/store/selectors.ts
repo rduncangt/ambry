@@ -1,12 +1,11 @@
 /**
- * Pure read-model selectors over the doc. Derived, never stored (the shopping
- * list is a VIEW — PLAN.md §1.6): no in_cart field; the in-cart section is
- * derived from today's purchase events, so mid-trip state survives page kills
- * for free.
+ * Pure read-model selectors over the doc. Shopping needs come from item
+ * flags; pending cart contents come from saved staging markers, never from
+ * purchase history (those quantities have already reached the pantry).
  */
 import { sortEventsNewestFirst } from "../domain/history";
 import { historyFor } from "../domain/merge";
-import { purchaseAmounts, type PurchaseAmount } from "../domain/purchases";
+import { isCartExtra, isCartItem } from "../domain/shopping";
 import type { AmbryDoc, Item, ShoppingExtra, HistoryEvent } from "../types";
 import { EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
 
@@ -36,80 +35,31 @@ export function liveItems(doc: AmbryDoc): Item[] {
 }
 
 export interface ShoppingList {
-  /** flagged && !deleted, oldest flagged_at first. */
+  /** Flagged live items not yet staged, oldest flagged_at first. */
   toBuy: Item[];
-  /** Live extras, oldest first. */
+  /** Live extras not yet staged, oldest first. */
   extras: ShoppingExtra[];
-  /**
-   * Items with a `purchase` event since local midnight — the dimmed in-cart
-   * section. Currently-flagged items are excluded: a put-back (or re-flagged)
-   * item belongs to To Buy and must never appear in both sections at once.
-   */
+  /** Pending purchases, oldest carted_at first. No day boundary. */
   inCart: Item[];
-  /** Actual purchases this trip, separate from current pantry quantities. */
-  cartAmounts: Map<string, PurchaseAmount[]>;
+  cartExtras: ShoppingExtra[];
 }
 
-export function shoppingList(doc: AmbryDoc, nowIso: string): ShoppingList {
+export function shoppingList(doc: AmbryDoc, _nowIso?: string): ShoppingList {
   // Oldest-flagged first: the longest-standing need tops the list. filter()
   // already copied, so sort() never mutates doc.items.
   const toBuy = doc.items
-    .filter((i) => i.flagged && i.deleted_at === null)
+    .filter((i) => i.flagged && i.deleted_at === null && !isCartItem(i))
     .sort((a, b) => isoAsc(a.flagged_at, b.flagged_at));
 
   const extras = doc.extras
-    .filter((x) => x.deleted_at === null)
+    .filter((x) => x.deleted_at === null && !isCartExtra(x))
     .sort((a, b) => isoAsc(a.created_at, b.created_at));
 
-  // "Today" is the shopper's calendar day, not UTC's: local midnight of
-  // nowIso. new Date(iso) then setHours(0,...) lands on 00:00 in the
-  // environment's local timezone — a purchase at 11 pm must still be
-  // "in cart" at 11:30 pm even when UTC has already rolled over.
-  const midnightLocal = new Date(nowIso);
-  midnightLocal.setHours(0, 0, 0, 0);
-  // The in-cart receipt covers THIS trip: purchases since local midnight
-  // (inclusive) and STRICTLY after the last "Finish trip" stamp — an event
-  // sharing the stamp's instant belongs to the finished trip, so finishing
-  // clears the receipt immediately instead of waiting for the day to roll.
-  const tripEnd = doc.settings.last_trip_ended_at;
-  const tripEndMs = tripEnd !== null ? Date.parse(tripEnd) : -Infinity;
-  const midnight = midnightLocal.getTime();
-
-  const liveById = new Map<string, Item>();
-  for (const item of doc.items) {
-    if (item.deleted_at === null) liveById.set(item.id, item);
-  }
-  // First qualifying purchase decides order; a re-purchase (bought 2, went
-  // back for 1 more) must not duplicate the row. Flagged items are excluded:
-  // unpurchase re-raises the flag, so a put-back row moves (whole, not
-  // duplicated) back to the To Buy section above.
-  // Reversal-aware: per item, the LATEST of today's {purchase, "put back"
-  // reversal recount} decides. Without this, a reversed check-off resurfaces
-  // as "in the cart" the moment its re-raised flag is later cleared — a dim
-  // row claiming stock that never came home. Both reversal paths (Put back
-  // and the undo toast) mark their compensating recount with note "put back".
-  const inCart: Item[] = [];
-  const decided = new Set<string>();
-  for (let i = doc.events.length - 1; i >= 0; i--) {
-    const e = doc.events[i];
-    if (e === undefined || decided.has(e.item_id)) continue;
-    const t = Date.parse(e.at);
-    if (t < midnight || t <= tripEndMs) continue;
-    const isPurchase = e.kind === "purchase";
-    const isReversal = e.kind === "recount" && e.note === "put back";
-    if (!isPurchase && !isReversal) continue;
-    decided.add(e.item_id);
-    if (!isPurchase) continue; // latest word on this item today: reversed
-    const item = liveById.get(e.item_id);
-    if (item !== undefined && !item.flagged) inCart.push(item);
-  }
-  inCart.reverse(); // newest-first scan flipped: rows order by each item's LATEST purchase, oldest of those first
-
-  const cartAmounts = purchaseAmounts(doc.events.filter((e) => {
-    const t = Date.parse(e.at);
-    return t >= midnight && t > tripEndMs;
-  }));
-  return { toBuy, extras, inCart, cartAmounts };
+  const inCart = doc.items.filter(isCartItem)
+    .sort((a, b) => isoAsc(a.carted_at ?? null, b.carted_at ?? null));
+  const cartExtras = doc.extras.filter(isCartExtra)
+    .sort((a, b) => isoAsc(a.carted_at ?? null, b.carted_at ?? null));
+  return { toBuy, extras, inCart, cartExtras };
 }
 
 export interface CategoryGroup {

@@ -18,8 +18,7 @@
 }
 .shop-empty { color: var(--muted); padding: var(--s3) 0; }
 
-/* One-line explainer directly under a section title ("checked off this
-   trip"): same muted voice, no uppercase — it explains, it doesn't label. */
+/* Checkout explanation directly below the cart heading. */
 .shop-section-sub {
   font-size: 13px;
   color: var(--muted);
@@ -157,15 +156,6 @@
   text-underline-offset: 2px;
 }
 
-/* -- in-cart cards are dimmed confirmations -------------------------------- */
-.shop-cart-row { opacity: 0.55; }
-/* The done-mark sits where a To Buy card's cart button sits — same 52px
-   right column, mirrored by the red cart-minus (Put back) in that same spot,
-   so a row keeps its landmark when it moves to the cart. */
-/* The quiet escape hatch aligns to the card's left text rhythm; negative
-   margins give back most of the 44px target's slack so the dimmed card
-   stays compact (the toast-undo trick). */
-
 /* -- one-shot promote prompt (PLAN.md §1.6) -------------------------------- */
 .shop-prompt {
   display: flex;
@@ -206,9 +196,10 @@
   padding: 1px 7px;
 }
 
-/* The trip's closing verb: full-width, quiet, sitting under the receipt. */
+/* Checkout is the commit action under the editable cart. */
 .shop-finish {
   width: 100%;
+  min-height: 52px;
   margin-top: var(--s2);
 }
 

@@ -42,16 +42,15 @@ describe("organizeItems command", () => {
     expect(JSON.stringify(store.getDoc())).toBe(before);
     store.flush();
   });
-  it("receipt uses only the active trip and survives inventory corrections", () => {
-    const { store, a, now } = setup();
-    store.purchase(a.id);
-    expect(shoppingList(store.getDoc(), now()).cartAmounts.get(a.id)).toEqual([{ amount: 5, unit: "count" }]);
+  it("a staged amount survives organization and inventory corrections until checkout", () => {
+    const { store, a } = setup();
+    store.stageItem(a.id);
+    store.organizeItems([a.id], { location: "fridge" });
     store.setQuantity(a.id, 40);
-    expect(shoppingList(store.getDoc(), now()).cartAmounts.get(a.id)?.[0]?.amount).toBe(5);
-    store.finishTrip();
-    expect(shoppingList(store.getDoc(), now()).cartAmounts.size).toBe(0);
-    store.flagManual(a.id); store.purchase(a.id, 2);
-    expect(shoppingList(store.getDoc(), now()).cartAmounts.get(a.id)?.[0]?.amount).toBe(2);
+    expect(shoppingList(store.getDoc()).inCart[0]?.shopping_amount).toBe(5);
+    store.checkout();
+    expect(shoppingList(store.getDoc()).inCart).toEqual([]);
+    expect(store.getDoc().items.find((i) => i.id === a.id)?.quantity).toBe(45);
     store.flush();
   });
 });

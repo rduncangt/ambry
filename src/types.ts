@@ -50,6 +50,9 @@ export interface Item {
   /** This shopping trip's chosen amount, in `unit`; absent = restock_amount.
    *  Optional so existing v1 documents/backups retain their usual default. */
   shopping_amount?: number;
+  /** Staged for checkout; stock and the resupply flag have not changed yet.
+   *  A staged item always has an explicit shopping_amount. */
+  carted_at?: string;
   /** Suppresses threshold auto-raise ONLY; manual flagging still works. */
   never_prompt: boolean;
 
@@ -76,7 +79,7 @@ export type EventKind =
   | "add"        // stepper up
   | "use"        // stepper down
   | "recount"    // absolute entry / ladder tap / audit fix — stamps verified_at
-  | "purchase"   // shopping check-off — clears the flag
+  | "purchase"   // completed checkout — clears the flag
   | "unit_change"
   | "merge"
   | "delete"
@@ -105,7 +108,9 @@ export interface ShoppingExtra {
   text: string;
   created_at: string;
   updated_at: string;
-  /** Check-off = soft delete; hard-pruned after EXTRA_PRUNE_DAYS. */
+  /** Staged for checkout; absent while still on the shopping list. */
+  carted_at?: string;
+  /** Checkout = soft delete; hard-pruned after EXTRA_PRUNE_DAYS. */
   deleted_at: string | null;
 }
 
@@ -115,10 +120,8 @@ export interface Settings {
   last_export_at: string | null;
   /** Stored, not derived — pruning can't distort it. */
   writes_since_export: number;
-  /** When the last shopping trip was closed ("Finish trip"): the in-cart
-   *  receipt shows purchases after max(local midnight, this stamp), so
-   *  finishing clears it immediately and the next check-off opens a fresh
-   *  trip. Null = no trip ever finished. */
+  /** When the last checkout completed. Pending cart contents have no
+   *  midnight cutoff and survive until checked out or put back. */
   last_trip_ended_at: string | null;
   /** Locations declared by hand ("set up the garage freezer before filling
    *  it"): plain strings, unioned case-insensitively with the locations

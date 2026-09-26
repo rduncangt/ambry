@@ -92,7 +92,8 @@ function Shell() {
 
   const nowIso = now();
   const nag = exportNag(doc, nowIso);
-  const toBuyCount = shoppingList(doc, nowIso).toBuy.length;
+  const shopping = shoppingList(doc);
+  const toBuyCount = shopping.toBuy.length + shopping.inCart.length + shopping.extras.length + shopping.cartExtras.length;
 
   const openItem =
     nav.openItemId !== null ? doc.items.find((i) => i.id === nav.openItemId) : undefined;
