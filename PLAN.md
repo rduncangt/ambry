@@ -359,11 +359,33 @@ write the human didn't observe is drift manufactured by the app. `now − verifi
 drift made measurable; micro-audits ("10 stalest in the pantry, 2 minutes") beat
 guilt-inducing full audits. Seeding the pantry doubles as the shelf walk's shakedown.
 
-**Export**: one pretty-printed JSON envelope — `app`, `schema_version`, `exported_at`,
-`device_label`, counts, and *everything* (items incl. tombstones, events, extras,
-settings). Filename `ambry-backup-2026-08-27-1930.json` (sortable). Via
-`navigator.share({files})` → iCloud Drive / AirDrop; `<a download>` fallback on desktop
-only. Old exports are free point-in-time archives — keep them all.
+**Inventory file (revised 2026-09-28)**: the everyday action is **Save inventory file**
+(first copy) / **Update inventory file** (subsequent copies). Always suggest
+`ambry-inventory.json`, without a date, so the user can replace their regular file.
+The More screen shows that name, the last copy and changes since it, and instructions
+for saving in the same folder and confirming replacement. Saving a file is explicit;
+ordinary edits continue to live on the device and do not silently update an external file.
+
+**Keep a separate copy → Save a dated copy** is an optional secondary action. Only
+that action uses `ambry-backup-2026-08-27-1930.json` (local time, sortable). It does not
+change the next routine save's name. Restore from a file is visually separate and keeps
+the preview, staleness guard and pre-import snapshot. Existing dated backups still restore.
+
+Both choices contain the same full-fidelity, pretty-printed JSON envelope: `app`,
+`schema_version`, `exported_at`, `device_label`, counts, and *everything* (items incl.
+tombstones, events, extras, settings). The date remains inside the file even when it is
+absent from the filename. Reminder banners use the same routine inventory-file save.
+
+Prefer a native save picker where supported: the user chooses the file and confirms
+replacement, and export bookkeeping runs only after the writable stream closes. No file
+handle is retained and no background file writes occur. On iPhone, use
+`navigator.share({files})` → Save to Files / iCloud Drive; the user still selects the
+folder and confirms Replace. A completed share is described as a handoff, never proof
+that an existing file was overwritten. Preserve the Android text/plain retry and the
+non-iOS download fallback. A download suggests the same name but cannot overwrite an
+existing file itself; the result tells the user to replace their old copy. Cancellation
+or failure never resets the reminder or falls through from a failed native save to a
+second file. Concurrent save taps are ignored while a picker/share is open.
 
 **Import**: parse → validate `schema_version` (refuse files newer than the app with
 "update the app first", not a parse error) → migrate → preview ("Backup from Aug 12:
