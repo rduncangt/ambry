@@ -5,15 +5,15 @@
  * (AGENTS.md rule 1); import is the gated whole-file REPLACE with the
  * §1.3 staleness guard — and snapshot restores reuse the same gate.
  */
-import { useEffect, useState } from "preact/hooks";
-import { checkStaleness, parseImport, type StalenessCheck } from "../../domain/exportImport";
+import { useEffect, useRef, useState } from "preact/hooks";
+import { checkStaleness, INVENTORY_FILENAME, parseImport, type ExportKind, type StalenessCheck } from "../../domain/exportImport";
 import { fmtAge } from "../../domain/format";
 import { SNAPSHOT_PREFIX } from "../../store/adapter";
 import { STALE_DAYS, liveItems, staleCount } from "../../store/selectors";
 import { now, type AmbryDoc } from "../../types";
 import { APP_VERSION } from "../../version";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
-import { doExportWithToast, pickFile, readText } from "../share";
+import { doExportWithToast, exportMessage, pickFile, readText, supportsSaveFilePicker, type ExportResult } from "../share";
 import { checkForUpdates, getUpdateStatus, isIOS, isStandalone, subscribeUpdate, subscribeUpdateStatus, type UpdatePhase } from "../sw-client";
 import "./settings.css";
 
@@ -21,7 +21,7 @@ export function SettingsView() {
   return (
     <section class="view">
       <h1 class="view-title">More</h1>
-      <BackupSection />
+      <InventoryFileSection />
       <ReconcileSection />
       <InstallSection />
       <HousekeepingSection />
@@ -172,18 +172,34 @@ function ImportPreview(props: {
 }
 
 // ---------------------------------------------------------------------------
-// Backup — export via share sheet, gated import
+// Inventory file — routine replacement, optional archive, gated restore
 // ---------------------------------------------------------------------------
 
-function BackupSection() {
+function InventoryFileSection() {
   const store = useStore();
   const doc = useDoc();
   const toast = useToast();
   const [pending, setPending] = useState<PendingImport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState<ExportKind | null>(null);
+  const savingRef = useRef(false);
+  const [result, setResult] = useState<{ outcome: ExportResult; kind: ExportKind } | null>(null);
 
   const nowIso = now();
   const settings = doc.settings;
+  const changes = settings.writes_since_export;
+  const hasCopy = settings.last_export_at !== null;
+
+  async function save(kind: ExportKind): Promise<void> {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(kind);
+    setResult(null);
+    const outcome = await doExportWithToast(store, toast, kind);
+    setResult({ outcome, kind });
+    setSaving(null);
+    savingRef.current = false;
+  }
 
   async function chooseImport(): Promise<void> {
     setError(null);
@@ -207,34 +223,58 @@ function BackupSection() {
 
   return (
     <section class="settings-section">
-      <h2 class="settings-h">Backup</h2>
-      <div class="settings-kv">
-        <span class="settings-kv-label">Last backup</span>
-        <span>{fmtAge(settings.last_export_at, nowIso)}</span>
-      </div>
-      <div class="settings-kv">
-        <span class="settings-kv-label">Writes since backup</span>
-        <span>{settings.writes_since_export}</span>
-      </div>
-      <p class="settings-note">
-        Data since the last export is unprotected; the nag threshold bounds that window.
-      </p>
-      <div class="settings-stack">
+      <h2 class="settings-h">Inventory file</h2>
+      <div class="settings-file-card">
+        <div>
+          <div class="settings-file-name">{INVENTORY_FILENAME}</div>
+          <p class="settings-note">One file to keep up to date. Includes your pantry, shopping list and history.</p>
+        </div>
+        <div class="settings-file-status">
+          <span>{hasCopy ? `Last copy: ${fmtAge(settings.last_export_at, nowIso)}` : "No file saved yet"}</span>
+          {hasCopy && <span>{changes === 0 ? "No changes since then" : `${changes} ${changes === 1 ? "change" : "changes"} since then`}</span>}
+        </div>
         <button
           class="btn btn-primary btn-big"
           type="button"
-          onClick={() => void doExportWithToast(store, toast)}
+          disabled={saving !== null}
+          onClick={() => void save("inventory")}
         >
-          Export backup
+          {saving === "inventory" ? "Saving…" : hasCopy ? "Update inventory file" : "Save inventory file"}
         </button>
         <p class="settings-note">
-          From the share sheet, save to iCloud Drive or AirDrop to another
-          device — a backup that stays on this phone dies with the phone.
+          {supportsSaveFilePicker()
+            ? "Choose your existing file to replace it, or create it the first time. A cloud folder keeps it available on your other devices."
+            : isIOS()
+              ? <>Choose <strong>Save to Files</strong>, use the same folder, then <strong>Replace</strong> when asked. iCloud Drive keeps a copy off this phone.</>
+              : "Save to the same folder and replace the old file when asked. If your browser downloads a separate copy, move it over the old one."}
         </p>
-        {pending === null && (
-          <button class="btn" type="button" onClick={() => void chooseImport()}>
-            Import backup…
+      </div>
+      <p class="settings-note settings-file-local">Changes stay in Ambry as you go. Update this file when you want a fresh copy outside the app.</p>
+
+      <details class="settings-file-copy">
+        <summary>Keep a separate copy</summary>
+        <div class="settings-stack">
+          <p class="settings-note">Save this version with a date in the filename, so you can keep it alongside your regular inventory file.</p>
+          <button class="btn" type="button" disabled={saving !== null} onClick={() => void save("dated-copy")}>
+            {saving === "dated-copy" ? "Saving…" : "Save a dated copy"}
           </button>
+        </div>
+      </details>
+      {result !== null && (
+        <p class={result.outcome === "failed" ? "settings-error settings-file-result" : "settings-note settings-file-result"}
+          role={result.outcome === "failed" ? "alert" : "status"}>
+          {exportMessage(result.outcome, result.kind)}
+        </p>
+      )}
+
+      <div class="settings-stack settings-file-restore">
+        {pending === null && (
+          <>
+            <button class="btn" type="button" disabled={saving !== null} onClick={() => void chooseImport()}>
+              Restore from a file…
+            </button>
+            <p class="settings-note">Use an inventory file or an older backup to replace this pantry. You’ll review it before anything changes.</p>
+          </>
         )}
         {error !== null && <p class="settings-error">{error}</p>}
         {pending !== null && (
@@ -500,8 +540,7 @@ function HousekeepingSection() {
           />
         </label>
         <p class="settings-note">
-          Stamped into every backup file, so a folder of exports says which device wrote each
-          one.
+          Included inside saved files so you can tell which device they came from.
         </p>
         <button class="btn" type="button" onClick={pruneNow}>
           Prune now

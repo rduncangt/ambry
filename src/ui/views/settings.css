@@ -15,6 +15,28 @@
 .settings-note { font-size: 14px; color: var(--muted); }
 .settings-error { font-size: 14px; font-weight: 600; color: var(--danger); }
 
+/* One everyday save, with archives and restore given less visual weight. */
+.settings-file-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.settings-file-name { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; margin-bottom: var(--s1); }
+.settings-file-status { display: flex; flex-direction: column; gap: var(--s1); font-size: 14px; color: var(--muted); }
+.settings-file-local { margin: var(--s3) 0; }
+.settings-file-copy { border-bottom: 1px solid var(--line); padding-bottom: var(--s2); }
+.settings-file-copy summary { cursor: pointer; padding: var(--s3) 0; font-weight: 600; min-height: 44px; }
+.settings-file-copy .settings-stack { padding: 0 0 var(--s3); }
+.settings-file-result { margin-top: var(--s3); }
+.settings-file-restore { margin-top: var(--s4); }
+.settings-file-card button:disabled,
+.settings-file-copy button:disabled,
+.settings-file-restore button:disabled { opacity: 0.55; cursor: wait; }
+
 .settings-field { display: block; }
 .settings-field-label {
   display: block;

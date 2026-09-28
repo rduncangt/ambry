@@ -1,31 +1,87 @@
 /**
- * Export via the share sheet + file-picking helpers (PLAN.md §1.1: the share
- * sheet's default destinations are off-device — iCloud Drive, AirDrop — which
- * is the whole point; a bare <a download> is the desktop-only fallback).
+ * Save an inventory file or an optional dated copy. Prefer a native save
+ * picker where available, then the phone's share sheet. iOS never falls
+ * back to an unobservable anchor download (PLAN.md §1.1).
  */
-import { exportFilename } from "../domain/exportImport";
+import { exportFilename, type ExportKind } from "../domain/exportImport";
 import type { Store } from "../store/store";
 import type { ShowToast } from "./hooks";
 import { isIOS } from "./sw-client";
 
-export type ExportResult = "shared" | "downloaded" | "cancelled" | "failed";
+export type ExportResult = "saved" | "shared" | "downloaded" | "cancelled" | "failed" | "busy";
+
+// The picker is not in TypeScript's Window interface. Keep the surface
+// narrow: no retained handles, second database, or background file writes.
+type SaveFilePicker = (options: {
+  id: string;
+  suggestedName: string;
+  types: { description: string; accept: Record<string, string[]> }[];
+}) => Promise<{ createWritable(): Promise<FileSystemWritableFileStream> }>;
+const fileWindow = window as Window & { showSaveFilePicker?: SaveFilePicker };
+
+export function supportsSaveFilePicker(): boolean {
+  return typeof fileWindow.showSaveFilePicker === "function";
+}
+
+let exporting = false;
+
+/** One export at a time, including taps from another view or a banner. */
+export async function exportFlow(store: Store, kind: ExportKind = "inventory"): Promise<ExportResult> {
+  if (exporting) return "busy";
+  exporting = true;
+  try {
+    return await writeExport(store, kind);
+  } catch {
+    return "failed";
+  } finally {
+    exporting = false;
+  }
+}
 
 /**
- * Build the envelope and hand it to navigator.share when file-sharing is
- * supported; the anchor download is the fallback only off iOS (Android's share sheet also gets a text/plain retry first — application/json is widely rejected there). recordExport()
- * runs ONLY on a completed share/download — an abandoned share sheet
- * (AbortError) must not silently reset the staleness nag, and a share
- * FAILURE must never claim success: on standalone iOS the <a download>
+ * Build the full envelope for every path. Record a native save only after
+ * the file closes successfully. Otherwise record the completed handoff or
+ * download. An abandoned picker/share sheet (AbortError) must not reset
+ * the reminder, and a share failure must never claim success: on
+ * standalone iOS the <a download>
  * fallback can fail silently, so stamping last_export_at there would disarm
  * the staleness nag while no backup exists (the durability lie PLAN.md §1.1
- * forbids). "failed" means nothing left the device.
+ * forbids). A failure never claims the inventory file was updated.
  */
-export async function exportFlow(store: Store): Promise<ExportResult> {
+async function writeExport(store: Store, kind: ExportKind): Promise<ExportResult> {
   const envelope = store.buildExport();
   // Pretty-printed (PLAN.md §2 Export): the backup doubles as a
   // human-inspectable archive.
   const json = JSON.stringify(envelope, null, 2);
-  const name = exportFilename(new Date());
+  const name = exportFilename(new Date(envelope.exported_at), kind);
+
+  if (supportsSaveFilePicker()) {
+    let handle: Awaited<ReturnType<SaveFilePicker>>;
+    try {
+      // Called before the first await, preserving the initiating tap. The
+      // browser remembers this picker's folder and confirms replacements.
+      handle = await fileWindow.showSaveFilePicker!({
+        id: "ambry-inventory",
+        suggestedName: name,
+        types: [{ description: "Ambry inventory", accept: { "application/json": [".json"] } }],
+      });
+    } catch (error) {
+      return error instanceof DOMException && error.name === "AbortError" ? "cancelled" : "failed";
+    }
+    let writable: FileSystemWritableFileStream | undefined;
+    try {
+      writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+    } catch {
+      // Abort the uncommitted stream if still open. A write/close failure
+      // must not become a second download or clear the backup reminder.
+      try { await writable?.abort(); } catch { /* already closed or errored */ }
+      return "failed";
+    }
+    store.recordExport();
+    return "saved";
+  }
 
   /** One share attempt; "cancelled" only for the user closing the sheet. */
   const tryShare = async (file: File): Promise<ExportResult> => {
@@ -65,8 +121,8 @@ export async function exportFlow(store: Store): Promise<ExportResult> {
     return "failed";
   }
 
-  // Everywhere else the download is dependable (Android: lands in
-  // Downloads; desktop: normal save).
+  // A download cannot replace an existing file on our behalf. Keep the
+  // suggested name stable and make that last step explicit in the result.
   const url = URL.createObjectURL(jsonFile);
   const a = document.createElement("a");
   a.href = url;
@@ -86,12 +142,24 @@ export async function exportFlow(store: Store): Promise<ExportResult> {
  * goes through here so no caller can invent its own (possibly dishonest)
  * wording for a cancelled or failed export.
  */
-export async function doExportWithToast(store: Store, toast: ShowToast): Promise<void> {
-  const result = await exportFlow(store);
-  if (result === "shared") toast("Backup exported");
-  else if (result === "downloaded") toast("Backup downloaded");
-  else if (result === "cancelled") toast("Export cancelled — no backup was made");
-  else toast("Export failed — try again");
+export function exportMessage(result: ExportResult, kind: ExportKind = "inventory"): string {
+  const file = kind === "inventory" ? "Inventory file" : "Dated copy";
+  if (result === "saved") return `${file} saved`;
+  if (result === "shared") return `${file} sent to your chosen app`;
+  if (result === "downloaded") return kind === "inventory"
+    ? "File downloaded — replace the old copy in your usual folder."
+    : "Dated copy downloaded";
+  if (result === "cancelled") return "Cancelled — no file was saved";
+  if (result === "busy") return "A file save is already open";
+  return "Could not save the file — try again";
+}
+
+export async function doExportWithToast(
+  store: Store, toast: ShowToast, kind: ExportKind = "inventory",
+): Promise<ExportResult> {
+  const result = await exportFlow(store, kind);
+  toast(exportMessage(result, kind));
+  return result;
 }
 
 /**

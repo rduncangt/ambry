@@ -127,6 +127,13 @@ describe("buildExport", () => {
 // ---------------------------------------------------------------------------
 
 describe("exportFilename", () => {
+  it("uses the same inventory filename across saves, days and years by default", () => {
+    for (const date of [new Date(2026, 8, 28, 9), new Date(2026, 8, 28, 20), new Date(2027, 0, 1)]) {
+      expect(exportFilename(date)).toBe("ambry-inventory.json");
+      expect(exportFilename(date, "inventory")).toBe("ambry-inventory.json");
+    }
+  });
+
   // Dates are constructed from LOCAL components, so these pass in any TZ.
   const cases: Array<[string, Date, string]> = [
     ["evening", new Date(2026, 7, 27, 19, 30), "ambry-backup-2026-08-27-1930.json"],
@@ -135,7 +142,13 @@ describe("exportFilename", () => {
     ["end of day", new Date(2026, 8, 1, 23, 59), "ambry-backup-2026-09-01-2359.json"],
   ];
   it.each(cases)("%s", (_label, d, expected) => {
-    expect(exportFilename(d)).toBe(expected);
+    expect(exportFilename(d, "dated-copy")).toBe(expected);
+  });
+
+  it("keeps dated copies opt-in rather than changing the next routine save", () => {
+    const date = new Date(2026, 8, 28, 9, 30);
+    expect(exportFilename(date, "dated-copy")).toBe("ambry-backup-2026-09-28-0930.json");
+    expect(exportFilename(date)).toBe("ambry-inventory.json");
   });
 });
 
