@@ -112,8 +112,8 @@ function Shell() {
           </Banner>
         )}
         {store.saveError() && (
-          <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
-            <strong>Storage full — changes are NOT being saved.</strong> Export a backup now,
+          <Banner kind="warn" action="Save file" onAction={() => void doExportWithToast(store, toast)}>
+            <strong>Storage full — changes are NOT being saved.</strong> Save your inventory file now,
             then free space by deleting old snapshots in More → Housekeeping.
           </Banner>
         )}
@@ -135,7 +135,7 @@ function Shell() {
           // half-sentence above the sticky Pantry header. The what's-at-risk
           // sentence lives in Settings next to the same numbers; the banner
           // names whichever threshold actually fired (age or write count).
-          <Banner kind="warn" action="Export" onAction={() => void doExportWithToast(store, toast)}>
+          <Banner kind="warn" action="Save file" onAction={() => void doExportWithToast(store, toast)}>
             {bannerCopy(doc, nowIso)}
           </Banner>
         )}

@@ -28,8 +28,12 @@ export function buildExport(doc: AmbryDoc, nowIso: string, deviceLabel?: string)
   };
 }
 
-/** "ambry-backup-2026-08-27-1930.json" — local time, sortable. */
-export function exportFilename(d: Date): string {
+export const INVENTORY_FILENAME = "ambry-inventory.json";
+export type ExportKind = "inventory" | "dated-copy";
+
+/** Routine saves keep one name; a dated archive is an explicit choice. */
+export function exportFilename(d: Date, kind: ExportKind = "inventory"): string {
+  if (kind === "inventory") return INVENTORY_FILENAME;
   const pad = (n: number): string => String(n).padStart(2, "0");
   // Local time on purpose: the filename is for the human sorting a folder of
   // backups, and "1930" should match the clock on the wall when they tapped.
