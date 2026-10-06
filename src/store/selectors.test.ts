@@ -11,22 +11,18 @@ import { memoryAdapter } from "./adapter";
 import { emptyDoc } from "./doc";
 import { createStore } from "./store";
 import {
-  FRESH_DAYS,
-  STALE_DAYS,
   backupAgeDays,
   exportNag,
   groupByCategory,
   isLow,
   isUncounted,
+  itemsForShelfWalk,
   itemsInLocation,
   liveItems,
   locationSummaries,
-  needsCheck,
   purchaseRhythm,
   resolveVocabValue,
   shoppingList,
-  staleCount,
-  stalest,
   valuesInUse,
   type ExportNagLevel,
 } from "./selectors";
@@ -395,120 +391,52 @@ describe("valuesInUse", () => {
   });
 });
 
-describe("stalest", () => {
-  it("orders live items by verified_at ascending with nulls (never verified) first", () => {
-    const recent = makeItem({ verified_at: "2026-08-20T00:00:00.000Z" });
-    const never = makeItem({ verified_at: null });
-    const old = makeItem({ verified_at: "2026-08-05T00:00:00.000Z" });
-    const deleted = makeItem({ verified_at: null, deleted_at: NOW });
-    const doc = makeDoc({ items: [recent, never, old, deleted] });
-    expect(stalest(doc)).toEqual([never, old, recent]);
+describe("itemsForShelfWalk", () => {
+  it("lists live items by name regardless of whether their counts are old, recent or unconfirmed", () => {
+    const recent = makeItem({ name: "Apples", verified_at: NOW });
+    const never = makeItem({ name: "Rice", verified_at: null });
+    const old = makeItem({ name: "Butter", quantity: 10, verified_at: "2020-01-01T00:00:00.000Z" });
+    const deleted = makeItem({ name: "Deleted", deleted_at: NOW });
+    const doc = makeDoc({ items: [never, old, recent, deleted] });
+    expect(itemsForShelfWalk(doc)).toEqual([recent, old, never]);
   });
 
-  it("filters to one location when asked (micro-audit by shelf)", () => {
-    const pantryOld = makeItem({ location: "pantry", verified_at: "2026-08-05T00:00:00.000Z" });
-    const pantryNever = makeItem({ location: "pantry", verified_at: null });
-    const fridge = makeItem({ location: "fridge", verified_at: null });
-    const nowhere = makeItem({ location: null, verified_at: null });
-    const doc = makeDoc({ items: [pantryOld, fridge, pantryNever, nowhere] });
-    expect(stalest(doc, "pantry")).toEqual([pantryNever, pantryOld]);
-    expect(stalest(doc)).toHaveLength(4);
-  });
-});
-
-describe("needsCheck", () => {
-  const iso = (msBeforeNow: number): string => new Date(Date.parse(NOW) - msBeforeNow).toISOString();
-
-  it("FRESH_DAYS is a floor under STALE_DAYS — the two thresholds stay distinct", () => {
-    expect(FRESH_DAYS).toBeLessThan(STALE_DAYS);
+  it("scopes an explicitly chosen location, including items with no location", () => {
+    const pantry = makeItem({ location: "pantry" });
+    const fridge = makeItem({ location: "fridge" });
+    const nowhere = makeItem({ location: null });
+    const deleted = makeItem({ location: "fridge", deleted_at: NOW });
+    const doc = makeDoc({ items: [pantry, fridge, nowhere, deleted] });
+    expect(itemsForShelfWalk(doc, "fridge")).toEqual([fridge]);
+    expect(itemsForShelfWalk(doc, null)).toEqual([nowhere]);
+    expect(itemsForShelfWalk(doc)).toHaveLength(3);
+    expect(itemsForShelfWalk(doc, "empty shelf")).toEqual([]);
   });
 
-  it("includes items last confirmed more than FRESH_DAYS ago; excludes fresh confirms", () => {
-    const overdue = makeItem({ verified_at: iso((FRESH_DAYS + 1) * DAY_MS) });
-    const justChecked = makeItem({ verified_at: iso(47 * 60_000) }); // 47 minutes ago
-    const doc = makeDoc({ items: [overdue, justChecked] });
-    expect(needsCheck(doc, NOW)).toEqual([overdue]);
+  it("does not move or exclude a row when its confirmation date changes", () => {
+    const butter = makeItem({ name: "Butter", verified_at: null });
+    const rice = makeItem({ name: "Rice", verified_at: NOW });
+    const doc = makeDoc({ items: [rice, butter] });
+    expect(itemsForShelfWalk(doc)).toEqual([butter, rice]);
+    butter.verified_at = "2040-01-01T00:00:00.000Z";
+    expect(itemsForShelfWalk(doc)).toEqual([butter, rice]);
+    expect(doc.items).toEqual([rice, butter]); // sorting never mutates the document
   });
 
-  it("a freshly counted pantry produces an EMPTY list, not a manufactured stalest-10", () => {
-    const items = Array.from({ length: 12 }, () => makeItem({ verified_at: iso(1 * DAY_MS) }));
-    expect(needsCheck(makeDoc({ items }), NOW)).toEqual([]);
-  });
-
-  it("boundary: confirmed exactly FRESH_DAYS ago is still fresh (strictly more than, matching staleCount)", () => {
-    const atBoundary = makeItem({ verified_at: iso(FRESH_DAYS * DAY_MS) });
-    const justOver = makeItem({ verified_at: iso(FRESH_DAYS * DAY_MS + 1) });
-    const doc = makeDoc({ items: [atBoundary, justOver] });
-    expect(needsCheck(doc, NOW)).toEqual([justOver]);
-  });
-
-  it("never-verified items fall back to created_at — a fresh seed is trusted for its first week", () => {
-    const seededToday = makeItem({ verified_at: null, created_at: iso(0) });
-    const seededLongAgo = makeItem({ verified_at: null, created_at: iso((FRESH_DAYS + 2) * DAY_MS) });
-    const doc = makeDoc({ items: [seededToday, seededLongAgo] });
-    expect(needsCheck(doc, NOW)).toEqual([seededLongAgo]);
-  });
-
-  it("verified_at wins over an old created_at (same clock as staleCount)", () => {
-    const doc = makeDoc({
-      items: [makeItem({ created_at: iso(100 * DAY_MS), verified_at: iso(1 * DAY_MS) })],
-    });
-    expect(needsCheck(doc, NOW)).toEqual([]);
-  });
-
-  it("orders stalest first: never-verified (old created_at) before dated verified_at ascending", () => {
-    const old = makeItem({ verified_at: iso(20 * DAY_MS) });
-    const older = makeItem({ verified_at: iso(25 * DAY_MS) });
-    const never = makeItem({ verified_at: null, created_at: iso(50 * DAY_MS) });
-    const doc = makeDoc({ items: [old, never, older] });
-    expect(needsCheck(doc, NOW)).toEqual([never, older, old]);
-  });
-
-  it("filters to one location when asked and ignores soft-deleted items", () => {
-    const pantry = makeItem({ location: "pantry", verified_at: iso(10 * DAY_MS) });
-    const fridge = makeItem({ location: "fridge", verified_at: iso(10 * DAY_MS) });
-    const deleted = makeItem({ location: "pantry", verified_at: iso(10 * DAY_MS), deleted_at: NOW });
-    const doc = makeDoc({ items: [pantry, fridge, deleted] });
-    expect(needsCheck(doc, NOW, "pantry")).toEqual([pantry]);
-    expect(needsCheck(doc, NOW)).toEqual([pantry, fridge]);
-  });
-});
-
-describe("staleCount", () => {
-  const iso = (msBeforeNow: number): string => new Date(Date.parse(NOW) - msBeforeNow).toISOString();
-
-  it("counts live items whose verified_at is more than STALE_DAYS old", () => {
-    const stale = makeItem({ verified_at: iso((STALE_DAYS + 1) * DAY_MS) });
-    const fresh = makeItem({ verified_at: iso(1 * DAY_MS) });
-    const doc = makeDoc({ items: [stale, fresh] });
-    expect(staleCount(doc, NOW)).toBe(1);
-  });
-
-  it("an item verified exactly STALE_DAYS ago is not yet stale (strictly more than)", () => {
-    const doc = makeDoc({ items: [makeItem({ verified_at: iso(STALE_DAYS * DAY_MS) })] });
-    expect(staleCount(doc, NOW)).toBe(0);
-  });
-
-  it("never-verified items fall back to created_at — a fresh pantry is not instantly stale", () => {
-    const seededToday = makeItem({ verified_at: null, created_at: iso(0) });
-    const seededLongAgo = makeItem({ verified_at: null, created_at: iso((STALE_DAYS + 5) * DAY_MS) });
-    const doc = makeDoc({ items: [seededToday, seededLongAgo] });
-    expect(staleCount(doc, NOW)).toBe(1);
-  });
-
-  it("verified_at wins over an old created_at", () => {
-    // Created ages ago but confirmed yesterday: not stale.
-    const doc = makeDoc({
-      items: [makeItem({ created_at: iso(100 * DAY_MS), verified_at: iso(1 * DAY_MS) })],
-    });
-    expect(staleCount(doc, NOW)).toBe(0);
-  });
-
-  it("ignores soft-deleted items", () => {
-    const doc = makeDoc({
-      items: [makeItem({ verified_at: iso(100 * DAY_MS), deleted_at: NOW })],
-    });
-    expect(staleCount(doc, NOW)).toBe(0);
+  it("preserves a recent stock update with an old confirmation as time passes", () => {
+    let at = "2020-01-01T00:00:00.000Z";
+    const store = createStore(memoryAdapter(), { now: () => at });
+    const butter = store.createItem({ name: "Butter", unit: "stick", location: "fridge" });
+    store.setQuantity(butter.id, 4);
+    at = "2026-09-26T12:00:00.000Z";
+    store.adjustQuantity(butter.id, 6);
+    store.flush();
+    const before = structuredClone(store.getDoc());
+    at = "2040-01-01T00:00:00.000Z";
+    expect(itemsForShelfWalk(store.getDoc(), "fridge")).toEqual([butter]);
+    expect(butter.quantity).toBe(10);
+    expect(butter.verified_at).toBe("2020-01-01T00:00:00.000Z");
+    expect(store.getDoc()).toEqual(before);
   });
 });
 

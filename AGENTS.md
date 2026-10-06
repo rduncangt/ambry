@@ -5,6 +5,10 @@ installed to home screen), no server, no accounts. `PLAN.md` is the authoritativ
 design document — read it before changing domain semantics. `ambry-planning-brief.md`
 is the original brief behind it.
 
+Inventory counts never expire. Never prompt, nag, badge, or queue the user to
+recheck inventory because time has passed. Shelf reviews are entirely voluntary;
+leaving one must never require resolving unchecked items.
+
 ## Commands
 
 - `npm run dev` — Vite dev server

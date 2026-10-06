@@ -3,6 +3,7 @@
    so concurrent sibling views can't collide in the global cascade. */
 
 .settings-section { margin-bottom: var(--s5); }
+.settings-tools summary { cursor: pointer; min-height: var(--tap); padding: var(--s3) 0; font-weight: 600; }
 .settings-h {
   font-size: 13px;
   font-weight: 700;

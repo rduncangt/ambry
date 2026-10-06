@@ -220,7 +220,7 @@ interface Item {
 
   expiry: string | null;         // "YYYY-MM-DD"
   barcodes: string[];            // reserved for phase-2 scanning; costs nothing now
-  verified_at: string | null;    // last human-confirmed observation — the anti-drift field
+  verified_at: string | null;    // last explicit count/confirmation; never a review deadline
   merged_into: string | null;    // set on the losing row of a merge
 
   created_at: string;
@@ -349,15 +349,21 @@ set-to-actual nudge), recorded as a `merge` event. Flags OR together.
 atomically, or force re-entry of both; `unit_change` event either way; round converted
 values at display time (0.432 bags must not render as 431.999… g).
 
-**Reconciliation** — answering the brief's own question: **both, because they're one
-primitive.** Everything anti-drift is a human absolute observation ("set to actual") that
-stamps `verified_at`. The quick gesture is that primitive on one item; walk-the-shelf mode
-is the same primitive batched by location (big **✓ looks right** = stamp only, no event;
-**fix** = recount), sorted oldest-`verified_at` first, with an end-of-pass "not seen" list
-offering explicit per-item zero-out / move / delete — never automatic zeroing, because a
-write the human didn't observe is drift manufactured by the app. `now − verified_at` is
-drift made measurable; micro-audits ("10 stalest in the pantry, 2 minutes") beat
-guilt-inducing full audits. Seeding the pantry doubles as the shelf walk's shakedown.
+**Inventory review (revised 2026-10-06).** Inventory counts never expire. Ambry must
+never nag the user to update or recheck stock because time has passed: no 7/30-day
+rules, stale-count banners, age captions, "Needs a check" queues, or review badges.
+The user updates quantities as part of using the pantry. An old `verified_at` is not
+evidence that the current quantity is wrong; routine stock changes and purchases can
+be recent even when that separate observation timestamp is old.
+
+An optional **More → Inventory tools → Walk the shelves** remains available only
+when explicitly opened. It lists the chosen location (or all items) alphabetically,
+with row order held steady during edits. **✓ Looks right** records an explicit
+confirmation and quantity controls work as usual. **Done** leaves immediately, even
+without touching any item; there is no unchecked-item follow-up or completion quota.
+Opening, leaving, or ignoring this tool changes no stock, flags, timestamps or history.
+Existing `verified_at` values are retained for data compatibility and first-count
+semantics, with no migration that pretends a new count happened.
 
 **Inventory file (revised 2026-09-28)**: the everyday action is **Save inventory file**
 (first copy) / **Update inventory file** (subsequent copies). Always suggest
@@ -551,13 +557,13 @@ aisle — in under 2 minutes of total app interaction.
 
 ### M3 — Drift kit, then the full load-in
 
-Walk-the-shelf reconcile mode (✓ / fix / not-seen list); staleness surfacing; merge tool;
+Optional walk-the-shelf tool (✓ / edit / leave freely); no timed review reminders; merge tool;
 unit-change guarded flow; retention pruning; settings (retention, export nag, version);
 expiry badge + expiring-soon filter. **Then** the full ~300-item load-in as the first
 real shelf walk — the drift tools' shakedown on the day drift is born.
 
-**Exit = v1.** A two-bags-of-flour discrepancy is fixable in one gesture, and a weekly
-two-minute walk keeps trust.
+**Exit = v1.** A two-bags-of-flour discrepancy is fixable in one gesture, whenever
+the user notices it. No review schedule is imposed.
 
 ### Deliberately deferred within v1
 
@@ -578,6 +584,7 @@ adapter.
 | Unit vocab | Chip row of ~7 common + typeahead over units in use | No unit-management screen |
 | Launch view | Inventory, search pinned, grouped by location, alpha within; no launch-state memory | The 3-second answer is decided at cold launch |
 | Search focus | Big target, NOT auto-focused | Keyboard jumping up on every launch is friction |
+| Inventory reviews | Entirely voluntary; never requested based on elapsed time | Saved counts remain valid until the user changes them |
 | Quantity zero | Stays visible with "out" badge + Out filter | Auto-hide makes absence indistinguishable from never-tracked |
 | Threshold comparison | Raise when a write lands ≤ threshold moving down, or on the item's first count | Revised 2026-08-28 — see §2 Flags; purchases excepted |
 | Purchase always clears flag | Yes, even if still ≤ threshold | Matches the brief's letter; next use re-crosses and re-flags |

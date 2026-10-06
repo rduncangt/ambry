@@ -36,26 +36,6 @@
   border-color: var(--accent);
 }
 
-/* Screen-caption line (the reconcile nudge inside the sticky header). The
-   stale hint is a real button (it navigates to reconcile) styled as an
-   inline link. */
-.inv-summary {
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--s1);
-}
-.inv-stale {
-  background: none;
-  border: none;
-  padding: 0 var(--s1);
-  min-height: var(--tap);
-  color: var(--accent);
-  font-size: 14px;
-  font-weight: 600;
-}
-
 /* Location cards — the default screen is a shelf directory, not the full
    list: one generous tappable card per location. (The "Low & flagged" strip
    that once sat above them is gone — flags live on the Shopping tab.) */
