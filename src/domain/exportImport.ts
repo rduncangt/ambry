@@ -161,8 +161,8 @@ export function checkStaleness(local: AmbryDoc, incoming: AmbryDoc): StalenessCh
  * Re-stamp a doc's item/extra timestamps to `nowIso`, IN PLACE. Built for the
  * bundled starter pantry: its JSON carries frozen build-time dates, so
  * without this a user starting fresh N days after the seed was generated
- * boots a minutes-old pantry that instantly claims "N days of data at risk",
- * fills "Needs a check", and reads fully stale. Events are deliberately NOT
+ * boots a minutes-old pantry that instantly claims "N days of data at risk".
+ * Events are deliberately NOT
  * touched — restamping history would falsify a real backup, and the seed
  * ships none. verified_at stays as-is (null in the seed: uncounted is true).
  */

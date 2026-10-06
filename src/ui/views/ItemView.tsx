@@ -1019,19 +1019,6 @@ function ItemBody(props: { item: Item; doc: AmbryDoc }) {
       {/* Quantity */}
       <section class="item-section item-qty-block">
         <QtyControl item={item} />
-        <div class="item-inline item-wide">
-          <span class="muted">Last confirmed {fmtAge(item.verified_at, nowIso)}</span>
-          <button
-            type="button"
-            class="btn"
-            onClick={() => {
-              store.verify(item.id);
-              toast(`${item.name}: confirmed`);
-            }}
-          >
-            ✓ Verify
-          </button>
-        </div>
         <div class="item-field">
           <div class="item-label">Shown as</div>
           <div class="chips">

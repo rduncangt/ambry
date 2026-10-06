@@ -100,8 +100,8 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
     );
     if (!ok) return;
     // The bundled seed's timestamps are frozen at build time; stamp the copy
-    // "now" so a fresh start begins with zero data-age (no instant staleness,
-    // no day-one "N days at risk" banner). The parse result is already a
+    // "now" so a fresh start has no day-one "N days at risk" backup banner.
+    // The parse result is already a
     // deep copy, so mutating it is safe.
     restampDoc(starter.doc, now());
     const outcome = store.importReplace(starter.doc);

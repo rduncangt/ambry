@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { checkStaleness, INVENTORY_FILENAME, parseImport, type ExportKind, type StalenessCheck } from "../../domain/exportImport";
 import { fmtAge } from "../../domain/format";
 import { SNAPSHOT_PREFIX } from "../../store/adapter";
-import { STALE_DAYS, liveItems, staleCount } from "../../store/selectors";
+import { liveItems } from "../../store/selectors";
 import { now, type AmbryDoc } from "../../types";
 import { APP_VERSION } from "../../version";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
@@ -297,25 +297,19 @@ function InventoryFileSection() {
 // ---------------------------------------------------------------------------
 
 function ReconcileSection() {
-  const doc = useDoc();
   const nav = useNav();
-  // The canonical staleness rule (selectors.staleCount) — the same count the
-  // pantry's stale line shows, so the two nudges can never disagree.
-  const stale = staleCount(doc, now());
 
   return (
     <section class="settings-section">
-      <h2 class="settings-h">Reconcile</h2>
-      <div class="settings-stack">
-        <button class="btn btn-big" type="button" onClick={() => nav.setView("reconcile")}>
-          Walk the shelves
-        </button>
-        <p class="settings-note">
-          {stale === 0
-            ? `Every item was confirmed within the last ${STALE_DAYS} days.`
-            : `${stale} item${stale === 1 ? "" : "s"} not confirmed in ${STALE_DAYS}+ days — a two-minute pass keeps the counts honest.`}
-        </p>
-      </div>
+      <details class="settings-tools">
+        <summary>Inventory tools</summary>
+        <div class="settings-stack">
+          <button class="btn btn-big" type="button" onClick={() => nav.setView("reconcile")}>
+            Walk the shelves
+          </button>
+          <p class="settings-note">View and adjust one location at a time, whenever you want.</p>
+        </div>
+      </details>
     </section>
   );
 }
