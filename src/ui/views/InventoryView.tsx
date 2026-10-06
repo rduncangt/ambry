@@ -29,13 +29,9 @@ import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
 import {
-  FRESH_DAYS,
-  STALE_DAYS,
   alpha,
-  isUncounted,
   itemsInLocation,
   locationSummaries,
-  staleCount,
   type LocationSummary,
 } from "../../store/selectors";
 import { now, type Item } from "../../types";
@@ -43,8 +39,6 @@ import { QtyControl } from "../components";
 import { useDoc, useNav, useStore, useToast } from "../hooks";
 import "./inventory.css";
 import { OrganizeSheet } from "./OrganizeSheet";
-
-const DAY_MS = 86_400_000;
 
 /** " · "-joined non-empty caption parts, or null so the row-sub line is
  *  omitted entirely (no empty second line inflating row height). */
@@ -71,24 +65,16 @@ function countedOrderAtOpen(counted: Item[]): string[] {
   return [...flagged, ...rest].map((i) => i.id);
 }
 
-/** Both per-visit snapshots, taken together the moment the shelf opens.
- *  dueIds joins them: rows due a check at open KEEP their caption line for
- *  the whole visit (it becomes "confirmed just now" after a fix) — the
- *  caption vanishing would change row height and shift the list under the
- *  finger, the exact hazard the order snapshot exists to prevent. */
+/** Both per-visit snapshots, taken together the moment the shelf opens. */
 function visitSnapshot(
   live: { counted: Item[]; uncounted: Item[] },
-  nowIso: string,
 ): {
   countedOrder: string[];
   uncountedIds: Set<string>;
-  dueIds: Set<string>;
 } {
-  const all = [...live.counted, ...live.uncounted];
   return {
     countedOrder: countedOrderAtOpen(live.counted),
     uncountedIds: new Set(live.uncounted.map((i) => i.id)),
-    dueIds: new Set(all.filter((i) => checkAgeCaption(i, nowIso) !== null).map((i) => i.id)),
   };
 }
 
@@ -133,7 +119,6 @@ function splitByVisit(
 
 export function InventoryView() {
   const doc = useDoc();
-  const nav = useNav();
   const store = useStore();
   const [query, setQuery] = useState("");
   const [organizing, setOrganizing] = useState(false);
@@ -147,7 +132,6 @@ export function InventoryView() {
     location: string | null;
     countedOrder: string[];
     uncountedIds: Set<string>;
-    dueIds: Set<string>;
   } | null>(null);
   /** Uncounted pile revealed? Lives up here (not in LocationItems) so a
    *  search interlude does not reset it while the location stays open. */
@@ -160,7 +144,7 @@ export function InventoryView() {
 
   const openLocation = (location: string | null): void => {
     const split = itemsInLocation(doc, location);
-    setOpen({ location, ...visitSnapshot(split, now()) });
+    setOpen({ location, ...visitSnapshot(split) });
     // Collapsed on every fresh open — the divider is the reveal gesture —
     // UNLESS there is nothing counted to protect: an all-uncounted shelf
     // (the dominant state of a freshly seeded pantry) behind a collapsed
@@ -179,7 +163,6 @@ export function InventoryView() {
   const openLive = open !== null && !searching ? itemsInLocation(doc, open.location) : null;
   const openSplit =
     open !== null && openLive !== null ? splitByVisit(openLive, open) : null;
-  const stale = staleCount(doc, nowIso);
 
   // A declared location standing entirely empty may be un-declared from its
   // own screen. The stored casing (not the typed one) is what removeLocation
@@ -227,19 +210,7 @@ export function InventoryView() {
             </p>
           </>
         ) : (
-          <>
-            <h1 class="view-title">Pantry</h1>
-            {/* The reconcile nudge is the screen caption. The canonical
-                staleness rule lives in the selector so this line and the
-                More tab can never disagree. */}
-            {!searching && stale > 0 && (
-              <p class="inv-summary">
-                <button class="inv-stale" type="button" onClick={() => nav.setView("reconcile")}>
-                  {stale} not checked in {STALE_DAYS}+ days ›
-                </button>
-              </p>
-            )}
-          </>
+          <h1 class="view-title">Pantry</h1>
         )}
         <button class="btn inv-organize" type="button" onClick={() => setOrganizing(true)}>Organize items</button>
       </header>
@@ -265,8 +236,6 @@ export function InventoryView() {
         <>
           <LocationItems
             split={openSplit}
-            nowIso={nowIso}
-            dueIds={open !== null ? open.dueIds : new Set()}
             showUncounted={showUncounted}
             onToggleUncounted={() => setShowUncounted(!showUncounted)}
           />
@@ -364,41 +333,10 @@ function LocationCard(props: {
   );
 }
 
-/** Location-row age microcaption: ONLY on rows due a check — the same
- *  FRESH_DAYS boundary the reconcile worklist (needsCheck) uses, strictly
- *  more than FRESH_DAYS since the last confirmation. Fresh rows stay
- *  silent (no age noise), and never-counted rows return null too: they
- *  already wear the dashed "–" value, so a caption would say it twice. */
-/** Caption for a row KNOWN to be due (snapshotted at open): skips the
- *  freshness gate so a mid-visit confirm reads "confirmed just now"
- *  instead of removing the line and jolting the layout. */
-function dueCaptionSticky(item: Item, nowIso: string): string {
-  return item.verified_at === null
-    ? `never confirmed · added ${fmtAge(item.created_at, nowIso)}`
-    : `confirmed ${fmtAge(item.verified_at, nowIso)}`;
-}
-
-function checkAgeCaption(item: Item, nowIso: string): string | null {
-  // Same clock as needsCheck: verified_at with a created_at fallback — an
-  // item created weeks ago and never confirmed IS due, and it is the most
-  // common state (createItem stamps no verification). Only isUncounted rows
-  // stay silent: their dashed "–" value already says everything.
-  if (isUncounted(item)) return null;
-  const freshAfter = Date.parse(nowIso) - FRESH_DAYS * DAY_MS;
-  const ref = item.verified_at ?? item.created_at;
-  if (Date.parse(ref) >= freshAfter) return null;
-  return item.verified_at === null
-    ? `never confirmed · added ${fmtAge(item.created_at, nowIso)}`
-    : `confirmed ${fmtAge(item.verified_at, nowIso)}`;
-}
-
-/** Open location: counted rows (no category caption — the shelf IS the
- *  context; a quiet "confirmed 12d ago" appears only once a row is due a
- *  check), then the uncounted pile behind its collapsed divider. */
+/** Open location: counted rows, then the uncounted pile behind its divider.
+ *  Saved counts have no age limit and carry no recheck prompts. */
 function LocationItems(props: {
   split: { counted: Item[]; uncounted: Item[] };
-  nowIso: string;
-  dueIds: Set<string>;
   showUncounted: boolean;
   onToggleUncounted: () => void;
 }) {
@@ -415,7 +353,7 @@ function LocationItems(props: {
         <ItemRow
           key={item.id}
           item={item}
-          caption={props.dueIds.has(item.id) ? dueCaptionSticky(item, props.nowIso) : null}
+          caption={null}
         />
       ))}
       {uncounted.length > 0 && (
@@ -438,12 +376,10 @@ function LocationItems(props: {
       )}
       {props.showUncounted &&
         uncounted.map((item) => (
-          // Never-counted (dashed) rows carry no caption; a row that was
-          // due at open keeps its caption slot for the visit.
           <ItemRow
             key={item.id}
             item={item}
-            caption={props.dueIds.has(item.id) ? dueCaptionSticky(item, props.nowIso) : null}
+            caption={null}
           />
         ))}
     </ul>

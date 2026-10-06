@@ -210,25 +210,6 @@ export function valuesInUse(doc: AmbryDoc, field: "category" | "location" | "uni
   return [...values].sort(alpha);
 }
 
-/** An item is "stale" once its last observation is more than this many days old. */
-export const STALE_DAYS = 30;
-
-/**
- * The canonical staleness rule: live items whose last human observation is
- * more than STALE_DAYS days before nowIso. Never-verified items fall back to
- * created_at — a freshly seeded pantry is not instantly "stale"; items age
- * INTO the reconcile nudge instead.
- */
-export function staleCount(doc: AmbryDoc, nowIso: string): number {
-  const staleBefore = Date.parse(nowIso) - STALE_DAYS * DAY_MS;
-  let count = 0;
-  for (const item of doc.items) {
-    if (item.deleted_at !== null) continue;
-    if (Date.parse(item.verified_at ?? item.created_at) < staleBefore) count++;
-  }
-  return count;
-}
-
 /**
  * Resolve a typed vocabulary value (category/location/unit) against the
  * values already in use: a case-insensitive match returns the EXISTING
@@ -244,39 +225,14 @@ export function resolveVocabValue(existing: string[], typed: string): string {
   return t;
 }
 
-/** Stalest-first for the reconcile flow: live items by verified_at ascending (nulls first). */
-export function stalest(doc: AmbryDoc, location?: string): Item[] {
+/** An explicitly opened shelf walk lists items by name. Counts never age
+ *  into a review queue; confirmation dates do not affect membership/order. */
+export function itemsForShelfWalk(doc: AmbryDoc, location?: string | null): Item[] {
   return doc.items
     .filter(
       (i) => i.deleted_at === null && (location === undefined || i.location === location),
     )
-    // null verified_at = never confirmed by a human — stalest of all, first.
-    .sort((a, b) => isoAsc(a.verified_at, b.verified_at));
-}
-
-/**
- * A count confirmed within this many days is trusted: reconcile stops asking
- * about it. This is the FLOOR under the micro-audit — without it, a "stalest
- * 10" always produces ten rows even in a freshly counted pantry, and
- * confirming items checked 47 minutes ago is mindless clicking that trains
- * the ✓ into a reflex. STALE_DAYS (30) stays the "stale" messaging threshold;
- * FRESH_DAYS is the younger bound below which nothing needs a check at all.
- */
-export const FRESH_DAYS = 7;
-
-/**
- * Live items NOT confirmed within FRESH_DAYS of nowIso — the reconcile
- * micro-audit's worklist. Same observation clock as staleCount:
- * verified_at with a created_at fallback, so a freshly seeded item is
- * trusted for its first week and ages INTO the check instead of demanding
- * one on day zero. Boundary matches staleCount's: exactly FRESH_DAYS old is
- * still fresh (strictly more than). Stalest first via the existing ordering.
- */
-export function needsCheck(doc: AmbryDoc, nowIso: string, location?: string): Item[] {
-  const freshAfter = Date.parse(nowIso) - FRESH_DAYS * DAY_MS;
-  return stalest(doc, location).filter(
-    (i) => Date.parse(i.verified_at ?? i.created_at) < freshAfter,
-  );
+    .sort((a, b) => alpha(a.name, b.name));
 }
 
 export interface PurchaseRhythm {
