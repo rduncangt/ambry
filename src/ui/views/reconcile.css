@@ -1,7 +1,4 @@
-/* Reconcile view — walk-the-shelf audit. View-specific rules only; all
-   primitives (.btn, .row-*, .chip, tokens) come from styles.css. */
-
-/* -- location picker: full-width tappable rows ----------------------------- */
+/* Optional shelf walk. Shared controls and tokens come from styles.css. */
 .recon-pick {
   display: flex;
   align-items: center;
@@ -16,39 +13,11 @@
   color: var(--ink);
 }
 .recon-pick .row-title,
-.recon-pick .row-sub {
-  display: block;
-}
-.recon-chevron {
-  color: var(--muted);
-  font-size: 20px;
-  flex-shrink: 0;
-}
-/* Calm empty state where the micro-audit row would be: everything was
-   confirmed within FRESH_DAYS, so there is nothing to walk — same quiet
-   voice as a pick row's sub-line, no border, nothing tappable. */
-.recon-fresh {
-  color: var(--muted);
-  font-size: 14px;
-  padding: var(--s2) 0;
-  margin: 0;
-  border-bottom: 1px solid var(--line);
-  min-height: 56px;
-  display: flex;
-  align-items: center;
-}
+.recon-pick .row-sub { display: block; }
+.recon-chevron { color: var(--muted); font-size: 20px; flex-shrink: 0; }
 
-/* -- walk header: location title + switch-back-to-picker ------------------- */
-.recon-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s3);
-}
-.recon-head .view-title {
-  flex: 1;
-  min-width: 0;
-  margin-bottom: 0;
-}
+.recon-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.recon-head .view-title { flex: 1; min-width: 0; margin-bottom: 0; overflow-wrap: anywhere; }
 .recon-switch {
   background: none;
   border: none;
@@ -57,108 +26,12 @@
   min-height: var(--tap);
   flex-shrink: 0;
 }
-
-.recon-progress {
-  color: var(--muted);
-  font-size: 14px;
-  margin: var(--s1) 0 var(--s3);
-}
-
-/* -- walk / sweep rows ------------------------------------------------------ */
-.recon-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.recon-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  padding: var(--s3) 0;
-  border-bottom: 1px solid var(--line);
-}
-/* verified/edited rows dim IN PLACE — never resorted, so the next row can't
-   slide under a finger mid-tap */
-.recon-touched {
-  opacity: 0.45;
-}
-.recon-check {
-  color: var(--ok);
-}
-.recon-row-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s3);
-}
-.recon-row-head .row-title {
-  min-width: 0;
-}
-.recon-row-head .row-sub {
-  flex-shrink: 0;
-}
-/* Walk rows show the non-brief unit line ("cartons · 1.5 L"); the tight
-   list cap would ellipsize its precise side. The acts row flex-wraps, so a
-   wider value just wraps the ✓ sooner on narrow phones. */
+.recon-caption { color: var(--muted); font-size: 14px; margin: var(--s1) 0 var(--s3); }
+.recon-list { list-style: none; margin: 0; padding: 0; }
+.recon-row { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.recon-row-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.recon-row-head .row-title { min-width: 0; }
+.recon-row-head .row-sub { color: var(--muted); }
 .recon-row-acts .stepper-value { max-width: 140px; }
-.recon-row-acts {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s2);
-  flex-wrap: wrap;
-}
-.recon-ok {
-  border-color: var(--ok);
-  color: var(--ok);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.recon-finish {
-  margin-top: var(--s4);
-}
-
-/* -- not-seen decisions ------------------------------------------------------ */
-.recon-sweep-acts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-}
-.recon-delete {
-  color: var(--danger);
-}
-.recon-move {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-.recon-move-new {
-  display: flex;
-  gap: var(--s2);
-}
-.recon-move-new .field-input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* -- done screen ------------------------------------------------------------ */
-.recon-done {
-  text-align: center;
-  padding-top: var(--s5);
-}
-.recon-done-mark {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto var(--s4);
-  border-radius: 50%;
-  background: var(--ok);
-  color: #fff;
-  font-size: 32px;
-  line-height: 64px;
-}
-.recon-done-acts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  margin-top: var(--s5);
-}
+.recon-row-acts { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); flex-wrap: wrap; }
+.recon-ok { border-color: var(--ok); color: var(--ok); font-weight: 600; flex-shrink: 0; }

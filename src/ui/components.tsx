@@ -290,8 +290,8 @@ export function QtyControl(props: {
     const restore = flagsBefore();
     // First observation: a +/− on a never-counted zero IS a count, not a
     // consumption delta — route it through the recount path so verified_at
-    // is stamped ("–" and staleness stop aging an item a human just
-    // counted). Subsequent taps are ordinary deltas again.
+    // is stamped and the unknown "–" becomes an actual count.
+    // Subsequent taps are ordinary deltas again.
     if (isUncounted(item)) {
       store.setQuantity(item.id, item.quantity + d);
       fireUndoToast(restore);
