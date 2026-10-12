@@ -19,9 +19,33 @@ must be stored; and "export and import" is one line of scope carrying the entire
 story of an app whose platform (iPhone browser storage) actively deletes data. The plan
 below incorporates the fixes; §1 argues each one.
 
-One decision is genuinely blocking and only you can make it: **the URL** (§6.1). Browser
-storage and the home-screen install are keyed to the origin, so the domain is effectively
-part of the database. Pick it before entering real data.
+The permanent URL is decided: **`ambry.sciomedes.com`** (§6.1). Browser storage and
+the home-screen install are keyed to that origin; keep it stable across releases.
+
+### v1 release scope (revised 2026-10-11)
+
+The user authorized the project manager, developer and UX reviewer to execute the
+stabilization recommendations. V1 covers the existing phone-first pantry, search,
+quantity editing, shopping/cart/checkout, inventory files, recovery, history,
+organization and optional shelf tools. Counts never expire and no completed pantry
+audit or minimum item count is required for release.
+
+The release pass fixes recovery-screen update access, truthful snapshot saves,
+retryable restore file-read errors, removal/undo of unwanted shopping extras, and
+accessible modal sheets. Inventory and storage tests, app packaging checks, and
+independent UX review must pass;
+device-only iPhone/iCloud/VoiceOver checks must be identified honestly rather than
+described as passed by a desktop browser simulation.
+
+**Explicitly deferred after v1:** a read-only desktop inventory-file viewer, expiry
+badges/expiring-soon filtering, and an Out-only filter. The existing optional expiry
+field and visible zero/Out quantities remain. These are future enhancements, not
+unfulfilled v1 release requirements. Barcode scanning, sync, seasonal archival and
+richer history also remain outside v1.
+
+The app can move directly from 0.11.x to 1.0.0 once acceptance is complete. The app
+version and `schema_version` are separate: a release number alone never requires a
+data migration or changes to the user's saved inventory.
 
 ---
 
@@ -102,9 +126,11 @@ seed the laptop:
 2. **Import is whole-file REPLACE, never merge.** Before replacing: compare the file's max
    `updated_at` against the local store's; refuse with a loud override when the file is
    older. Auto-snapshot the current data first.
-3. **The laptop's default mode is opening an export file read-only** (the app can render a
-   file without importing it). At most, an explicit checkout: import → bulk-edit → export
-   → replace-import on the phone before the next phone edit. At-your-own-risk.
+3. **The read-only laptop file viewer is deferred after v1 (2026-10-11).** V1
+   does not offer a separate viewer and must not imply that it does. A laptop
+   import creates an independent editable pantry; it never synchronizes with the
+   phone. An intentional transfer requires import → edit → export → guarded
+   replace-import on the phone before further phone edits.
 
 ### 1.4 v1 scope omits duplicate prevention while naming duplicates as how the inventory rots — MEDIUM
 
@@ -247,7 +273,7 @@ interface ShoppingExtra {
   created_at: string;
   updated_at: string;
   carted_at?: string;            // staged for checkout
-  deleted_at: string | null;     // checkout = soft delete; hard-pruned after ~7 days
+  deleted_at: string | null;     // checkout or explicit removal; hard-pruned after ~7 days
 }
 
 interface Settings {
@@ -336,6 +362,19 @@ Check for updates action with checking/downloading/current/ready/error states.
 An update is ready only after installation finishes. Failed or offline checks
 never report “up to date”; restarting first flushes pending pantry writes and
 refuses to reload when saving fails or another tab changed storage.
+The recovery screen must also expose update/check/restart without requiring a
+new pantry, so a newer-format backup's "update first" instruction is actionable.
+
+**Shopping extra removal (2026-10-11).** A typo or cancelled purchase can be
+removed directly from either To buy or the pending cart. This is a soft delete
+through the store, never a purchase or a pantry-stock change. Undo restores the
+extra to its prior list/cart state without rewriting other trip state.
+
+**Modal sheets (2026-10-11).** Opening a sheet moves focus inside it and makes
+the background unavailable to keyboard and assistive-technology interaction.
+Tab stays inside the top sheet; Escape closes only that sheet. Closing restores
+focus to the initiating control when it still exists. Nested sheets preserve
+the parent's state and release background isolation only when the last closes.
 
 **Merge** (duplicate repair): survivor keeps its ID; loser gets `deleted_at` +
 `merged_into`; loser's name and aliases append to survivor's aliases — so every repaired
@@ -392,6 +431,11 @@ non-iOS download fallback. A download suggests the same name but cannot overwrit
 existing file itself; the result tells the user to replace their old copy. Cancellation
 or failure never resets the reminder or falls through from a failed native save to a
 second file. Concurrent save taps are ignored while a picker/share is open.
+
+On-device snapshot exports use the same platform-aware save/error behavior but
+preserve the snapshot's original bytes, including a damaged snapshot. Saving a
+snapshot never marks the current pantry as exported. Cancellation or failure
+must not claim a successful save; iOS has no anchor-download fallback.
 
 **Import**: parse → validate `schema_version` (refuse files newer than the app with
 "update the app first", not a parse error) → migrate → preview ("Backup from Aug 12:
@@ -482,7 +526,9 @@ Google Domains infrastructure Squarespace inherited, not a Cloud DNS zone we con
 Setup as built: `public/CNAME` in the repo (Vite copies `public/` into `dist/`; a
 root-level CNAME would be dropped at build time and silently unset the domain), the
 repo's custom domain claimed *before* any DNS pointed at GitHub to close the
-subdomain-takeover window, then A/AAAA records at Squarespace, then Enforce HTTPS.
+subdomain-takeover window, then a CNAME at Squarespace pointing
+`ambry.sciomedes.com` to `rduncangt.github.io`, then Enforce HTTPS. The initial
+A/AAAA workaround was replaced on 2026-08-27 before the certificate issued.
 GitHub Pages is the right host here specifically because it takes a plain CNAME from any
 external DNS provider; Cloudflare Pages prefers the zone to live on Cloudflare, which
 this one doesn't. DNS can later repoint to a different static host without changing the
@@ -495,7 +541,7 @@ anything else served under `sciomedes.com`. Revisit a dedicated `ambry.*` domain
 this ever becomes something other than a personal tool — the migration cost then is a
 full export, a re-point, and a re-import on the new origin.
 
-**Testing — Vitest, domain layer only**: flag transitions, ladder mapping, normalization/
+**Testing — Vitest, inventory and storage rules**: flag transitions, ladder mapping, normalization/
 duplicate matching, merge (incl. chained), unit-change conversion and forced re-entry,
 migrations against old-shape fixtures, export/import round-trip. The UI gets none — it's
 exercised by living on it. This is the only place tests pay for themselves in a solo app.
@@ -555,23 +601,24 @@ promote-to-item after checkout.
 **Exit:** one real supermarket trip round-trips — flag at home, buy, check off in the
 aisle — in under 2 minutes of total app interaction.
 
-### M3 — Drift kit, then the full load-in
+### M3 — Inventory repair and dependable everyday use
 
 Optional walk-the-shelf tool (✓ / edit / leave freely); no timed review reminders; merge tool;
-unit-change guarded flow; retention pruning; settings (retention, export nag, version);
-expiry badge + expiring-soon filter. **Then** the full ~300-item load-in as the first
-real shelf walk — the drift tools' shakedown on the day drift is born.
+unit-change guarded flow; retention pruning; settings (retention, export nag, version).
+The 2026-10-11 release pass adds the recovery, error handling, shopping-extra removal
+and accessibility fixes listed in §0. Pantry load-in is voluntary, at the user's pace.
 
 **Exit = v1.** A two-bags-of-flour discrepancy is fixable in one gesture, whenever
-the user notices it. No review schedule is imposed.
+the user notices it; shopping, inventory-file recovery, offline use and updates
+have passed acceptance. No review schedule is imposed.
 
-### Deliberately deferred within v1
+### Deliberately deferred after v1
 
-Barcode (phase 2); any expiry UI beyond badge + filter (notifications need a server; out
-of scope); history browsing beyond the item-detail list; laptop polish (it's a read-only
-export viewer); fuzzy search; category/location management screens (picker-with-add is
-the whole feature); merge-on-import; any sync groundwork beyond the chokepoint and the
-adapter.
+Read-only desktop inventory-file viewing; expiry badges and filtering; an Out-only
+filter; barcode scanning; history browsing beyond the item-detail list; fuzzy search;
+seasonal archival; merge-on-import and sync. Existing bulk location/category editing
+is shipped functionality. None of these deferrals changes stored data or backup
+compatibility.
 
 ---
 
@@ -585,7 +632,7 @@ adapter.
 | Launch view | Inventory, search pinned, grouped by location, alpha within; no launch-state memory | The 3-second answer is decided at cold launch |
 | Search focus | Big target, NOT auto-focused | Keyboard jumping up on every launch is friction |
 | Inventory reviews | Entirely voluntary; never requested based on elapsed time | Saved counts remain valid until the user changes them |
-| Quantity zero | Stays visible with "out" badge + Out filter | Auto-hide makes absence indistinguishable from never-tracked |
+| Quantity zero | Stays visible with "out" state; Out-only filtering deferred | Auto-hide makes absence indistinguishable from never-tracked |
 | Threshold comparison | Raise when a write lands ≤ threshold moving down, or on the item's first count | Revised 2026-08-28 — see §2 Flags; purchases excepted |
 | Purchase always clears flag | Yes, even if still ≤ threshold | Matches the brief's letter; next use re-crosses and re-flags |
 | Ladder mapping | 1.0/0.5/0.2/0 write; 0.75/0.35/>0/0 read; code constant | Configurability here adds decisions, not accuracy |
@@ -605,14 +652,13 @@ adapter.
    `rduncangt/ambry` via GitHub Pages (Actions build, `public/CNAME`). DNS is managed at
    Squarespace, not Google Cloud DNS as §3 first assumed — the `ns-cloud-*` nameservers
    are legacy Google Domains infrastructure Squarespace inherited. Their editor rejected
-   a CNAME, so the subdomain points at GitHub's four A and four AAAA anycast addresses;
-   see TODO.md for the revisit.
-2. **The stack fork** (§3): Preact+TS+Vite (recommended) vs zero-build vanilla+JSDoc.
-   Everything else in this plan survives either choice.
-3. **Retention default** — brief says ~1 year, configurable; fine, and at localStorage
-   quota it's also the right cap. Confirm 365.
+   a CNAME initially; the temporary A/AAAA records were replaced with a single
+   CNAME on 2026-08-27. See §3 for the recorded deployment setup.
+2. **Stack — implemented:** Preact + TypeScript + Vite.
+3. **Retention default — implemented:** 365 days, configurable in More.
 4. **An `archived` state for seasonal items** (eggnog in July): not in v1 as planned —
-   `never_prompt` + Out covers most of it — but if seasonal clutter annoys you by M3,
-   it's a one-field addition. Defer or include now: your call.
-5. **Expiry depth**: plan ships badge + filter only. If you find you never enter expiry
-   dates by end of M3, drop the field from the edit form and keep it schema-only.
+   `never_prompt` + the visible Out state covers most of it. Deferred until a
+   concrete need appears in use.
+5. **Expiry depth — resolved for v1 (2026-10-11):** keep the optional date field;
+   defer expiry badges/filtering. Inventory quantities never acquire a recheck
+   deadline from either that date or elapsed time.

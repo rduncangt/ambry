@@ -23,47 +23,51 @@ export function supportsSaveFilePicker(): boolean {
   return typeof fileWindow.showSaveFilePicker === "function";
 }
 
-let exporting = false;
+let savingFile = false;
 
 /** One export at a time, including taps from another view or a banner. */
 export async function exportFlow(store: Store, kind: ExportKind = "inventory"): Promise<ExportResult> {
-  if (exporting) return "busy";
-  exporting = true;
+  return saveFileFlow(async () => {
+    const envelope = store.buildExport();
+    const result = await writeFile(JSON.stringify(envelope, null, 2), exportFilename(new Date(envelope.exported_at), kind));
+    if (result === "saved" || result === "shared" || result === "downloaded") store.recordExport();
+    return result;
+  });
+}
+
+/** Save snapshot text verbatim, without declaring the live inventory backed up. */
+export function saveSnapshotFile(text: string, name: string): Promise<ExportResult> {
+  return saveFileFlow(() => writeFile(text, name, "Ambry snapshot", "ambry-snapshot"));
+}
+
+async function saveFileFlow(write: () => Promise<ExportResult>): Promise<ExportResult> {
+  if (savingFile) return "busy";
+  savingFile = true;
   try {
-    return await writeExport(store, kind);
+    return await write();
   } catch {
     return "failed";
   } finally {
-    exporting = false;
+    savingFile = false;
   }
 }
 
 /**
- * Build the full envelope for every path. Record a native save only after
- * the file closes successfully. Otherwise record the completed handoff or
- * download. An abandoned picker/share sheet (AbortError) must not reset
- * the reminder, and a share failure must never claim success: on
- * standalone iOS the <a download>
- * fallback can fail silently, so stamping last_export_at there would disarm
- * the staleness nag while no backup exists (the durability lie PLAN.md §1.1
- * forbids). A failure never claims the inventory file was updated.
+ * Shared file transport: save only after the writable closes, or report a
+ * completed share/download handoff. Cancellation and failures never reach
+ * a second file path on iOS or after a failed native save. The caller owns
+ * bookkeeping; raw snapshots never stamp the live inventory as exported.
  */
-async function writeExport(store: Store, kind: ExportKind): Promise<ExportResult> {
-  const envelope = store.buildExport();
-  // Pretty-printed (PLAN.md §2 Export): the backup doubles as a
-  // human-inspectable archive.
-  const json = JSON.stringify(envelope, null, 2);
-  const name = exportFilename(new Date(envelope.exported_at), kind);
-
+async function writeFile(json: string, name: string, description = "Ambry inventory", pickerId = "ambry-inventory"): Promise<ExportResult> {
   if (supportsSaveFilePicker()) {
     let handle: Awaited<ReturnType<SaveFilePicker>>;
     try {
       // Called before the first await, preserving the initiating tap. The
       // browser remembers this picker's folder and confirms replacements.
       handle = await fileWindow.showSaveFilePicker!({
-        id: "ambry-inventory",
+        id: pickerId,
         suggestedName: name,
-        types: [{ description: "Ambry inventory", accept: { "application/json": [".json"] } }],
+        types: [{ description, accept: { "application/json": [".json"] } }],
       });
     } catch (error) {
       return error instanceof DOMException && error.name === "AbortError" ? "cancelled" : "failed";
@@ -79,7 +83,6 @@ async function writeExport(store: Store, kind: ExportKind): Promise<ExportResult
       try { await writable?.abort(); } catch { /* already closed or errored */ }
       return "failed";
     }
-    store.recordExport();
     return "saved";
   }
 
@@ -87,7 +90,6 @@ async function writeExport(store: Store, kind: ExportKind): Promise<ExportResult
   const tryShare = async (file: File): Promise<ExportResult> => {
     try {
       await navigator.share({ files: [file] });
-      store.recordExport();
       return "shared";
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
@@ -133,8 +135,16 @@ async function writeExport(store: Store, kind: ExportKind): Promise<ExportResult
   // Revoke later, not synchronously — some engines abort the save if the URL
   // dies before the download pipeline picks it up.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  store.recordExport();
   return "downloaded";
+}
+
+export function snapshotSaveMessage(result: ExportResult): string {
+  if (result === "saved") return "Snapshot file saved";
+  if (result === "shared") return "Snapshot sent to your chosen app";
+  if (result === "downloaded") return "Snapshot download started";
+  if (result === "cancelled") return "Cancelled — no snapshot file was saved";
+  if (result === "busy") return "A file save is already open";
+  return "Could not save the snapshot — check file sharing or storage access and try again";
 }
 
 /**

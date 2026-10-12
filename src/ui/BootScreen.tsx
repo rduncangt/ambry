@@ -18,6 +18,8 @@ import { parseImport, restampDoc } from "../domain/exportImport";
 import type { AmbryDoc } from "../types";
 import { useStore } from "./hooks";
 import { pickFile, readText } from "./share";
+import { UpdateControls } from "./UpdateControls";
+import { APP_VERSION } from "../version";
 import seedData from "../../seed/starter-pantry.json";
 
 interface RestorePreview {
@@ -134,7 +136,7 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
         </p>
       )}
 
-      {error !== null && <p class="boot-error">{error}</p>}
+      {error !== null && <p class="boot-error" role="alert">{error}</p>}
 
       {preview === null ? (
         <div class="boot-actions">
@@ -174,6 +176,10 @@ export function BootScreen(props: { status: "empty" | "corrupt"; onDone: () => v
           </div>
         </div>
       )}
+      <section class="boot-updates" aria-label="App updates">
+        <p class="muted">Installed version {APP_VERSION}. You can update Ambry before restoring a file.</p>
+        <UpdateControls />
+      </section>
     </div>
   );
 }
