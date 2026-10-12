@@ -205,3 +205,4 @@
 
 .shop-buy-amount { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
 .shop-buy-label { color: var(--muted); font-size: 14px; font-weight: 600; }
+.shop-extra-remove { min-width: var(--tap); min-height: var(--tap); flex-shrink: 0; }
