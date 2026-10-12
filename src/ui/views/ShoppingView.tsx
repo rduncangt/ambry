@@ -191,6 +191,7 @@ function ExtraCartRow(props: { extra: ShoppingExtra }) {
     <div class="shop-card">
       <div class="shop-card-top shop-card-center">
         <div class="shop-card-main"><div class="row-title">{extra.text}</div></div>
+        <RemoveExtraButton extra={extra} />
         <button class="shop-check shop-check-remove" type="button"
           aria-label={`Put ${extra.text} back — remove from cart`} onClick={() => {
             store.putBackExtra(extra.id);
@@ -212,6 +213,7 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
         <div key={extra.id} class="shop-card">
           <div class="shop-card-top shop-card-center">
             <div class="shop-card-main"><div class="row-title">{extra.text}</div></div>
+            <RemoveExtraButton extra={extra} />
             <button class="shop-check shop-check-add" type="button" aria-label={`Add ${extra.text} to cart`} onClick={() => {
               if (store.stageExtra(extra.id)) toast(`${extra.text} added to cart`, () => store.putBackExtra(extra.id));
             }}><CartPlusIcon /></button>
@@ -231,5 +233,17 @@ function ExtrasSection(props: { extras: ShoppingExtra[] }) {
         <button class="btn" type="submit">Add</button>
       </form>
     </div>
+  );
+}
+
+function RemoveExtraButton(props: { extra: ShoppingExtra }) {
+  const store = useStore();
+  const toast = useToast();
+  return (
+    <button class="shop-quiet shop-extra-remove" type="button" aria-label={`Remove ${props.extra.text} from shopping list`}
+      onClick={() => {
+        const removal = store.removeExtra(props.extra.id);
+        if (removal !== null) toast(`${props.extra.text} removed`, () => store.undoExtraRemoval(removal));
+      }}><TrashIcon /></button>
   );
 }

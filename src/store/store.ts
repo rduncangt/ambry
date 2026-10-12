@@ -82,6 +82,13 @@ export type CheckoutOutcome =
   | { ok: true; itemCount: number; extras: ShoppingExtra[] }
   | { ok: false; error: string };
 
+/** Session-local undo receipt; never stored as pantry data or history. */
+export interface ExtraRemoval {
+  id: string;
+  deletedAt: string;
+  cartedAt?: string;
+}
+
 export interface Store {
   // -- reading ------------------------------------------------------------
   getDoc(): AmbryDoc;
@@ -241,6 +248,8 @@ export interface Store {
   /** Check-off = soft delete. */
   checkExtra(id: string): void;
   uncheckExtra(id: string): void;
+  removeExtra(id: string): ExtraRemoval | null;
+  undoExtraRemoval(removal: ExtraRemoval): void;
 
   // -- backup / lifecycle --------------------------------------------------
   /** Envelope for the share sheet; does NOT mark exported (only a completed share does). */
@@ -299,6 +308,7 @@ export function createStore(
 
   const loaded = loadDoc(adapter);
   let doc = loaded.doc;
+  const extraRemovals = new Map<string, ExtraRemoval>();
   const status: BootStatus = loaded.status;
 
   const listeners = new Set<() => void>();
@@ -966,6 +976,7 @@ export function createStore(
     },
 
     checkExtra(id) {
+      extraRemovals.delete(id);
       const extra = extraById(id);
       if (extra.deleted_at !== null) return;
       const at = nowFn();
@@ -976,11 +987,36 @@ export function createStore(
     },
 
     uncheckExtra(id) {
+      extraRemovals.delete(id);
       const extra = extraById(id);
       if (extra.deleted_at === null) return;
       const at = nowFn();
       extra.deleted_at = null;
       extra.updated_at = at;
+      committed();
+    },
+
+    removeExtra(id) {
+      const extra = extraById(id);
+      if (extra.deleted_at !== null) return null;
+      const at = nowFn();
+      const removal: ExtraRemoval = { id, deletedAt: at, cartedAt: extra.carted_at };
+      extraRemovals.set(id, removal);
+      extra.deleted_at = at;
+      extra.updated_at = at;
+      delete extra.carted_at;
+      committed();
+      return removal;
+    },
+
+    undoExtraRemoval(removal) {
+      if (extraRemovals.get(removal.id) !== removal) return;
+      extraRemovals.delete(removal.id);
+      const extra = doc.extras.find((entry) => entry.id === removal.id);
+      if (extra === undefined || extra.deleted_at !== removal.deletedAt) return;
+      extra.deleted_at = null;
+      extra.updated_at = nowFn();
+      if (removal.cartedAt !== undefined) extra.carted_at = removal.cartedAt;
       committed();
     },
 
@@ -1024,6 +1060,7 @@ export function createStore(
         return { ok: false };
       }
       doc = newDoc;
+      extraRemovals.clear();
       // Reset save tracking: storage now holds exactly this doc, so nothing
       // is dirty, a pending debounce would only re-save it, and any earlier
       // quota failure was just superseded by a successful write.
@@ -1130,6 +1167,7 @@ export function createStore(
         return { ok: false, error: "Checkout could not be saved. Your cart is still here — free storage and try again." };
       }
       doc = next;
+      extraRemovals.clear(); // a finished trip retires all prior Undo receipts
       if (saveTimer !== null) clearTimeout(saveTimer);
       saveTimer = null;
       dirty = false;

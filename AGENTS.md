@@ -9,11 +9,23 @@ Inventory counts never expire. Never prompt, nag, badge, or queue the user to
 recheck inventory because time has passed. Shelf reviews are entirely voluntary;
 leaving one must never require resolving unchecked items.
 
+## Shared language
+
+Use plain, specific language that users and developers will understand the same
+way. Avoid terms with competing everyday and technical meanings. When a technical
+term is necessary, explain it on first use. This applies to app text, task lists,
+documentation, and agent messages.
+
+For example, say "inventory and storage tests," not "domain tests" (which can
+sound like tests of a website address). Say "prepare the app files for publishing"
+when explaining a production build, and distinguish that from publishing them.
+
 ## Commands
 
 - `npm run dev` — Vite dev server
-- `npm run build` — type-check (`tsc --noEmit`) + production build to `dist/`
-- `npm test` — Vitest, single run
+- `npm run build` — check TypeScript, prepare app files in `dist/`, and stamp the
+  offline cache/update identifier; does not publish the app
+- `npm test` — run the inventory and storage tests once with Vitest
 - `npm run test:watch` — Vitest in watch mode
 
 ## Architecture rules (violating these is a bug, not a style choice)

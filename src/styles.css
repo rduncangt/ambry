@@ -324,7 +324,7 @@ body::after {
 .sheet-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: calc(50 + var(--sheet-layer, 0));
   background: rgba(43, 32, 21, 0.45);
   display: flex;
   align-items: flex-end;
@@ -348,6 +348,7 @@ body::after {
   height: var(--tap);
   margin: calc(-1 * var(--s2));
 }
+.boot-updates { margin-top: var(--s5); padding-top: var(--s3); border-top: 1px solid var(--line); }
 
 /* -- tab bar ---------------------------------------------------------------
    .tabbar fixed in the thumb zone; .tab / .tab-active; .tab-badge count
