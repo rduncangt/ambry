@@ -31,7 +31,7 @@ const listDir = (sub) =>
     .map((entry) => `/${sub}/${entry.name}`)
     .sort();
 
-const precache = ["/", "/manifest.webmanifest", ...listDir("icons"), ...listDir("assets")];
+const precache = ["/", "/caret-check.html", "/manifest.webmanifest", ...listDir("icons"), ...listDir("assets")];
 
 // "/" is index.html on disk; hash it plus every other precached file.
 const hash = createHash("sha256");
