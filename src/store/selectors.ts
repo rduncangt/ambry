@@ -7,7 +7,7 @@ import { sortEventsNewestFirst } from "../domain/history";
 import { historyFor } from "../domain/merge";
 import { isCartExtra, isCartItem } from "../domain/shopping";
 import type { AmbryDoc, Item, ShoppingExtra, HistoryEvent } from "../types";
-import { EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
+import { COMMON_UNITS, EXPORT_NAG_DAYS, EXPORT_NAG_WRITES } from "../types";
 
 const DAY_MS = 86_400_000;
 
@@ -208,6 +208,26 @@ export function valuesInUse(doc: AmbryDoc, field: "category" | "location" | "uni
     if (v !== null && v.trim() !== "") values.add(v);
   }
   return [...values].sort(alpha);
+}
+
+/** Full creation choices: common units first, then all live pantry units.
+ *  Existing spelling wins; building the picker never rewrites saved items. */
+export function creationUnitOptions(doc: AmbryDoc): string[] {
+  const existing = new Map<string, string>();
+  for (const value of valuesInUse(doc, "unit")) {
+    const trimmed = value.trim();
+    const key = trimmed.toLowerCase();
+    if (!existing.has(key)) existing.set(key, trimmed);
+  }
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of [...COMMON_UNITS, ...existing.values()]) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(existing.get(key) ?? value);
+  }
+  return out;
 }
 
 /**
