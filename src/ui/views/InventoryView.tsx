@@ -24,7 +24,7 @@
  * All of this is component state on purpose: tab switches may reset it
  * (PLAN.md §5 — no launch-state memory).
  */
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
@@ -121,6 +121,7 @@ export function InventoryView() {
   const doc = useDoc();
   const store = useStore();
   const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
   const [organizing, setOrganizing] = useState(false);
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
@@ -249,18 +250,37 @@ export function InventoryView() {
         <PantryHome onOpen={openLocation} />
       )}
 
-      {/* Bottom-pinned search: fixed above the tab bar so the thumb reaches
-          it one-handed. type="search" gives iOS the clear (✕) affordance. */}
+      {/* Bottom-pinned search with an explicit clear button on every browser. */}
       <div class="inv-searchbar">
-        <input
-          class="inv-search"
-          type="search"
-          autocomplete="off"
-          placeholder="Search or add…"
-          aria-label="Search pantry"
-          value={query}
-          onInput={(e) => setQuery(e.currentTarget.value)}
-        />
+        <div class="inv-search-field">
+          <input
+            ref={searchInput}
+            class="inv-search"
+            type="search"
+            autocomplete="off"
+            placeholder="Search or add…"
+            aria-label="Search pantry"
+            value={query}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+          />
+          {query.length > 0 && (
+            <button
+              class="inv-search-clear"
+              type="button"
+              aria-label="Clear search"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => {
+                setQuery("");
+                searchInput.current?.focus();
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+                <circle cx="10" cy="10" r="9" fill="currentColor" />
+                <path d="m7 7 6 6m0-6-6 6" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );
