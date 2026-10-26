@@ -9,6 +9,20 @@ Inventory counts never expire. Never prompt, nag, badge, or queue the user to
 recheck inventory because time has passed. Shelf reviews are entirely voluntary;
 leaving one must never require resolving unchecked items.
 
+## Team responsibilities
+
+- `ambry-pm` manages scope, priorities, assignments, the task list, acceptance
+  decisions and releases. Delegate application development to `ambry-dev`,
+  including small fixes; do not implement it in the PM session.
+- `ambry-dev` investigates bugs, implements application changes and runs the
+  relevant technical checks.
+- `ambry-ux` independently reviews usability, appearance and accessibility,
+  reproduces problems and verifies fixes. Distinguish executed checks from
+  checks that still need a physical device.
+
+Use the existing Herdr agents. Coordinate shared files and browser sessions.
+Bring in additional specialists only for a specific need beyond these roles.
+
 ## Shared language
 
 Use plain, specific language that users and developers will understand the same
