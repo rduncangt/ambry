@@ -52,6 +52,7 @@ body {
 }
 /* 16px floor everywhere: any smaller and iOS zooms the viewport on focus */
 input, select, textarea, button { font: inherit; font-size: 16px; color: inherit; }
+.field-error { color: var(--danger); font-size: 14px; }
 h1, h2, h3, p { margin: 0; }
 
 /* -- app frame -------------------------------------------------------------

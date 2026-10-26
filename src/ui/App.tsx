@@ -7,11 +7,12 @@ import { backupAgeDays, exportNag, shoppingList } from "../store/selectors";
 import type { Store } from "../store/store";
 import { EXPORT_NAG_DAYS, now , type AmbryDoc } from "../types";
 import { BootScreen } from "./BootScreen";
-import { Banner, Sheet } from "./components";
+import { Banner, ItemOverlay } from "./components";
 import {
   NavProvider,
   StoreProvider,
   ToastProvider,
+  ToastViewport,
   useDoc,
   useNav,
   useStore,
@@ -160,20 +161,12 @@ function Shell() {
       </main>
 
       {nav.openItemId !== null && (
-        <div class="overlay">
-          {/* Sticky: deep in a long item page, "which item is this?" must
-              stay answered — the header pins below the status-bar inset and
-              rows slide under it (styles.css .overlay-head). */}
-          <header class="screen-head overlay-head">
-            <button class="back-btn" type="button" onClick={nav.closeItem}>
-              ‹ Back
-            </button>
-            <div class="screen-title">{openItem?.name ?? "Item"}</div>
-          </header>
+        <ItemOverlay title={openItem?.name ?? "Item"} onClose={nav.closeItem}>
           <div class="overlay-body">
             <ItemView id={nav.openItemId} />
           </div>
-        </div>
+          <ToastViewport />
+        </ItemOverlay>
       )}
 
       {nav.creating && <CreateSheet />}
@@ -205,6 +198,7 @@ function Shell() {
           {nag !== "none" && <span class="tab-dot" title="Backup recommended" />}
         </button>
       </nav>
+      {nav.openItemId === null && <ToastViewport />}
     </div>
   );
 }
