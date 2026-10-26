@@ -602,6 +602,7 @@ function AboutSection() {
         <span>{APP_VERSION}</span>
       </div>
       <UpdateControls />
+      <p class="settings-note"><a class="btn" style={{ display: "inline-flex", alignItems: "center" }} href="/caret-check.html">Text editing check</a> Temporary check with a pretend name. Your inventory is not used.</p>
       <div class="settings-kv">
         <span class="settings-kv-label">Items</span>
         <span>{deleted > 0 ? `${live} (+${deleted} deleted)` : String(live)}</span>
