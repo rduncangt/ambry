@@ -21,6 +21,31 @@ import { useStore, useToast } from "./hooks";
 
 const SheetParent = createContext<symbol | null>(null);
 
+/** Item details cover the screen and must isolate the controls behind them.
+ *  Child sheets share the same modal stack and retain their own focus scope. */
+export function ItemOverlay(props: { title: string; onClose: () => void; children: ComponentChildren }) {
+  const id = useRef(Symbol("item-details"));
+  const parent = useContext(SheetParent);
+  const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(props.onClose);
+  close.current = props.onClose;
+  useLayoutEffect(() => {
+    if (dialog.current === null) return;
+    return openModal(id.current, parent, dialog.current, dialog.current, () => close.current());
+  }, [parent]);
+  return createPortal(
+    <SheetParent.Provider value={id.current}>
+      <div ref={dialog} class="overlay" role="dialog" aria-modal="true" aria-label={props.title} tabIndex={-1}>
+        <header class="screen-head overlay-head">
+          <button class="back-btn" type="button" onClick={props.onClose}>‹ Back</button>
+          <div class="screen-title">{props.title}</div>
+        </header>
+        {props.children}
+      </div>
+    </SheetParent.Provider>, document.body,
+  );
+}
+
 export function Sheet(props: {
   open: boolean;
   onClose: () => void;
@@ -201,7 +226,7 @@ export function InlineQtyInput(props: { initial: string; onDone: (raw: string | 
         value={val}
         onInput={(e) => setVal(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") finish(null);
+          if (e.key === "Escape") { e.preventDefault(); finish(null); }
         }}
         onBlur={() => finish(val === props.initial ? null : val)}
       />

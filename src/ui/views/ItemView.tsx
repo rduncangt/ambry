@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { RUNG_LABELS, fmtAge, fmtQty, fmtQtyBoth, fmtQtyUnit, parseDec } from "../../domain/format";
 import { buildHistoryRows, type HistoryRow } from "../../domain/history";
+import { parseCreateNumbers } from "../../domain/createNumbers";
 import { rungValue } from "../../domain/ladder";
 import { historyFor, planMerge } from "../../domain/merge";
 import { duplicateCandidates, searchItems } from "../../domain/search";
@@ -32,6 +33,8 @@ import "./item.css";
 // ---------------------------------------------------------------------------
 
 const normUnit = (u: string): string => u.trim().toLowerCase();
+/** Explain the existing count choice without adding a second stored unit. */
+const unitChoiceLabel = (u: string): string => normUnit(u) === "count" ? "Count (individual items)" : u;
 
 /**
  * Which rung chip a numeric threshold displays as: the highest rung whose tap
@@ -241,7 +244,7 @@ function PickerRow(props: {
         <div
           class="chips"
           onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
+            if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
           }}
         >
           <button
@@ -417,7 +420,7 @@ function NameEditor(props: { current: string; onDone: (v: string | null) => void
         value={draft}
         onInput={(e) => setDraft(e.currentTarget.value)}
         onKeyDown={(e) => {
-          if (e.key === "Escape") finish(null);
+          if (e.key === "Escape") { e.preventDefault(); finish(null); }
         }}
         onBlur={commit}
       />
@@ -507,12 +510,12 @@ function UnitChangeSheet(props: { item: Item; onClose: () => void }) {
           </p>
           <div class="item-field">
             <div class="item-label">
-              New unit (currently <strong>{item.unit}</strong>)
+              New unit (currently <strong>{unitChoiceLabel(item.unit)}</strong>)
             </div>
             <div class="chips">
               {unitOptions(doc, item).map((u) => (
                 <button key={u} type="button" class="chip" onClick={() => setTarget(u)}>
-                  {u}
+                  {unitChoiceLabel(u)}
                 </button>
               ))}
             </div>
@@ -1347,6 +1350,8 @@ export function CreateSheet() {
   const effUnit =
     customUnit !== null && customUnit.trim() !== "" ? customUnit.trim() : unit;
   const usingCustom = customUnit !== null;
+  const numbers = parseCreateNumbers({ quantity: qty, threshold, packageAmount: pkgAmt, packageUnit: pkgUnit });
+  const errors = numbers.ok ? {} : numbers.errors;
 
   // Live duplicate guard (PLAN.md §1.4): tombstones included — restoring
   // keeps the UUID and history instead of minting a colliding duplicate.
@@ -1383,19 +1388,11 @@ export function CreateSheet() {
   const submit = (e: Event): void => {
     e.preventDefault();
     const trimmed = name.trim();
-    if (trimmed === "") return;
-    const input: CreateItemInput = { name: trimmed, unit: effUnit };
-    const q = parseDec(qty);
-    if (q !== null && q >= 0) input.quantity = q;
+    if (trimmed === "" || !numbers.ok) return;
+    const input: CreateItemInput = { name: trimmed, unit: effUnit, ...numbers.values };
     if (location !== null) input.location = location;
     if (category !== null) input.category = category;
     if (notes.trim() !== "") input.notes = notes.trim();
-    const thr = parseDec(threshold);
-    if (thr !== null && thr >= 0) input.threshold = thr;
-    const pa = parseDec(pkgAmt);
-    if (pa !== null && pa > 0 && pkgUnit.trim() !== "") {
-      input.package_size = { amount: pa, unit: pkgUnit.trim() };
-    }
     if (expiry !== "") input.expiry = expiry;
     const item = store.createItem(input);
     // Success-only hook (CreateDefaults.onCreated): fires exactly once,
@@ -1453,7 +1450,7 @@ export function CreateSheet() {
                   setCustomUnit(null);
                 }}
               >
-                {u}
+                {unitChoiceLabel(u)}
               </button>
             ))}
             <button
@@ -1485,9 +1482,12 @@ export function CreateSheet() {
             inputMode="decimal"
             autocomplete="off"
             aria-label="Quantity"
+            aria-invalid={errors.quantity ? "true" : undefined}
+            aria-describedby={errors.quantity ? "create-quantity-error" : undefined}
             value={qty}
             onInput={(e) => setQty(e.currentTarget.value)}
           />
+          {errors.quantity && <p id="create-quantity-error" class="field-error" role="alert">{errors.quantity}</p>}
         </div>
 
         {/* Deliberately EXPANDED, unlike ItemBody's collapsed PickerRows: at
@@ -1544,6 +1544,9 @@ export function CreateSheet() {
         <button type="button" class="btn" onClick={() => setMore(!more)}>
           {more ? "Fewer options" : "More options"}
         </button>
+        {!more && (errors.threshold || errors.packageAmount || errors.packageUnit) && (
+          <p class="field-error" role="alert">Open More options to correct the flag threshold or package size before adding this item.</p>
+        )}
 
         {more && (
           <>
@@ -1557,10 +1560,13 @@ export function CreateSheet() {
                 inputMode="decimal"
                 autocomplete="off"
                 aria-label="Flag threshold"
+                aria-invalid={errors.threshold ? "true" : undefined}
+                aria-describedby={errors.threshold ? "create-threshold-error" : undefined}
                 placeholder="off"
                 value={threshold}
                 onInput={(e) => setThreshold(e.currentTarget.value)}
               />
+              {errors.threshold && <p id="create-threshold-error" class="field-error" role="alert">{errors.threshold}</p>}
             </div>
             <div class="item-field">
               <div class="item-label">Package size: 1 {effUnit} =</div>
@@ -1571,6 +1577,8 @@ export function CreateSheet() {
                   inputMode="decimal"
                   autocomplete="off"
                   aria-label="Package amount"
+                  aria-invalid={errors.packageAmount ? "true" : undefined}
+                  aria-describedby={errors.packageAmount ? "create-package-amount-error" : undefined}
                   placeholder="amount"
                   value={pkgAmt}
                   onInput={(e) => setPkgAmt(e.currentTarget.value)}
@@ -1580,11 +1588,15 @@ export function CreateSheet() {
                   type="text"
                   autocomplete="off"
                   aria-label="Package unit"
+                  aria-invalid={errors.packageUnit ? "true" : undefined}
+                  aria-describedby={errors.packageUnit ? "create-package-unit-error" : undefined}
                   placeholder="unit (e.g. g)"
                   value={pkgUnit}
                   onInput={(e) => setPkgUnit(e.currentTarget.value)}
                 />
               </div>
+              {errors.packageAmount && <p id="create-package-amount-error" class="field-error" role="alert">{errors.packageAmount}</p>}
+              {errors.packageUnit && <p id="create-package-unit-error" class="field-error" role="alert">{errors.packageUnit}</p>}
             </div>
             <div class="item-field">
               <div class="item-label">Expiry</div>
@@ -1610,7 +1622,7 @@ export function CreateSheet() {
           </>
         )}
 
-        <button class="btn btn-primary btn-big" type="submit" disabled={name.trim() === ""}>
+        <button class="btn btn-primary btn-big" type="submit" disabled={name.trim() === "" || !numbers.ok}>
           Add
         </button>
       </form>
