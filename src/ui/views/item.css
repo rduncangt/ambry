@@ -168,3 +168,18 @@
   color: var(--ink);
 }
 .dupe-guard { display: flex; flex-direction: column; }
+
+.create-unit-package {
+  min-width: 0;
+  margin: 0;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.create-unit-package legend { padding: 0 var(--s1); }
+.create-package { min-width: 0; }
+.create-package summary { cursor: pointer; min-height: var(--tap); padding: var(--s3) 0; font-weight: 600; overflow-wrap: anywhere; }
+.create-package-fields { display: flex; flex-direction: column; gap: var(--s2); }
