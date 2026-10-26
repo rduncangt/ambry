@@ -43,11 +43,8 @@ self.addEventListener("message", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET" || !req.url.startsWith(self.location.origin)) return;
-  // Only the synthetic check has its own document and initialization boundary.
-  // All ordinary app navigations continue to use the cached root shell.
-  const key = req.mode === "navigate"
-    ? (new URL(req.url).pathname === "/caret-check.html" ? "/caret-check.html" : "/")
-    : req;
+  // Navigations serve the precached shell; everything else its own URL.
+  const key = req.mode === "navigate" ? "/" : req;
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
       const cached = await cache.match(key);
