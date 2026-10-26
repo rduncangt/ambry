@@ -21,10 +21,13 @@
   padding: var(--s2) calc(var(--s4) + env(safe-area-inset-right)) var(--s2)
     calc(var(--s4) + env(safe-area-inset-left));
 }
+.inv-search-field {
+  position: relative;
+}
 .inv-search {
   width: 100%;
   min-height: var(--tap);
-  padding: 0 var(--s4);
+  padding: 0 calc(var(--tap) + var(--s2)) 0 var(--s4);
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--card);
@@ -34,6 +37,35 @@
 .inv-search:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* Use the same clear control across browsers, without a second native one. */
+.inv-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.inv-search-clear {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--tap);
+  height: 100%;
+  min-height: var(--tap);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #737373;
+}
+.inv-search-clear path {
+  fill: none;
+  stroke: var(--card);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.inv-search-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
 }
 
 /* Location cards — the default screen is a shelf directory, not the full
