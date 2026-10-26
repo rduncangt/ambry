@@ -5,7 +5,7 @@
  * must NOT persist (PLAN.md §5 — no launch-state memory; the 3-second answer
  * is decided at cold launch).
  */
-import { createContext, h, type ComponentChildren } from "preact";
+import { createContext, Fragment, h, type ComponentChildren } from "preact";
 import { useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { AmbryDoc } from "../types";
 import type { Store } from "../store/store";
@@ -140,9 +140,11 @@ interface ActiveToast {
 }
 
 const ToastCtx = createContext<ShowToast | null>(null);
+const ToastViewCtx = createContext<ComponentChildren>(null);
 
 /**
- * Owns toast state AND renders the notice element (.toast in styles.css): a
+ * Owns toast state and notice content; the shell places the one visible
+ * ToastViewport on the page or inside item details. The notice is a
  * compact tap-through pill docked top-right — the bottom toast parked
  * itself exactly on the controls the user just tapped, and a full-width
  * top strip covered the back link ("‹ Locations") for its 3 s, so the pill
@@ -210,7 +212,14 @@ export function ToastProvider(props: { children: ComponentChildren }) {
           undoBtn,
         );
 
-  return h(ToastCtx.Provider, { value: show.current }, props.children, toastNode);
+  return h(ToastCtx.Provider, { value: show.current },
+    h(ToastViewCtx.Provider, { value: toastNode }, props.children));
+}
+
+/** The shell places the single live notice inside item details while open,
+ *  so Undo participates in that dialog's focus and accessibility boundary. */
+export function ToastViewport() {
+  return h(Fragment, null, useContext(ToastViewCtx));
 }
 
 /** Show a toast: `toast("Paprika: 2 bags", () => store.undoQuantity(...))`. */

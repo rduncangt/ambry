@@ -55,15 +55,16 @@ function onFocus(event: FocusEvent): void {
   const active = top();
   if (active && !active.dialog.contains(event.target as Node)) focusDialog(active);
 }
+function onEscape(event: KeyboardEvent): void {
+  const active = top();
+  if (!active || event.isComposing || event.defaultPrevented || event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  active.close();
+}
 function onKey(event: KeyboardEvent): void {
   const active = top();
   if (!active || event.isComposing) return;
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    active.close();
-    return;
-  }
   if (event.key !== "Tab") return;
   const nodes = controls(active.dialog);
   const current = document.activeElement;
@@ -94,6 +95,7 @@ export function openModal(id: symbol, parent: symbol | null, backdrop: HTMLEleme
       document.body.style.setProperty(property, value);
     }
     document.addEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onEscape);
     document.addEventListener("focusin", onFocus, true);
     observer = new MutationObserver(isolate);
     observer.observe(document.body, { childList: true });
@@ -116,6 +118,7 @@ export function openModal(id: symbol, parent: symbol | null, backdrop: HTMLEleme
     if (stack.length === 0) {
       observer?.disconnect(); observer = null;
       document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keydown", onEscape);
       document.removeEventListener("focusin", onFocus, true);
       for (const [property, state] of bodyStyles) {
         if (state.value === "") document.body.style.removeProperty(property);
@@ -124,6 +127,7 @@ export function openModal(id: symbol, parent: symbol | null, backdrop: HTMLEleme
       bodyStyles.clear();
       window.scrollTo(scrollX, scrollY);
       if (rootLauncher && usable(rootLauncher)) rootLauncher.focus({ preventScroll: true });
+      else document.querySelector<HTMLElement>("#app .tab-active")?.focus({ preventScroll: true });
       rootLauncher = null;
     } else if (wasTop) {
       const active = top()!;
