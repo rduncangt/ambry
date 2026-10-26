@@ -12,6 +12,7 @@ import { emptyDoc } from "./doc";
 import { createStore } from "./store";
 import {
   backupAgeDays,
+  creationUnitOptions,
   exportNag,
   groupByCategory,
   isLow,
@@ -388,6 +389,54 @@ describe("valuesInUse", () => {
     expect(valuesInUse(doc, "category")).toEqual(["Baking", "spices"]);
     expect(valuesInUse(doc, "location")).toEqual(["pantry"]);
     expect(valuesInUse(doc, "unit")).toEqual(["bag", "jar"]);
+  });
+});
+
+describe("creationUnitOptions", () => {
+  it("offers common choices without manufacturing Each aliases", () => {
+    const choices = creationUnitOptions(makeDoc());
+    expect(choices[0]).toBe("count");
+    expect(choices).toContain("bag");
+    expect(choices).not.toContain("each");
+    expect(choices).not.toContain("ea");
+  });
+
+  it("includes all live uncommon units and leaves deleted vocabulary out", () => {
+    const doc = makeDoc({ items: [
+      makeItem({ unit: "pouch" }), makeItem({ unit: "TuB" }), makeItem({ unit: "bunch" }),
+      makeItem({ unit: "retired sack", deleted_at: NOW }),
+    ] });
+    const before = structuredClone(doc);
+    expect(creationUnitOptions(doc).slice(-3)).toEqual(["bunch", "pouch", "TuB"]);
+    expect(creationUnitOptions(doc)).not.toContain("retired sack");
+    expect(doc).toEqual(before);
+  });
+
+  it("deduplicates trimmed case variants and reuses the stored casing", () => {
+    const doc = makeDoc({ items: [
+      makeItem({ unit: "BAG" }), makeItem({ unit: "TuB" }), makeItem({ unit: " tub " }),
+    ] });
+    const choices = creationUnitOptions(doc);
+    expect(choices.filter((unit) => unit.toLowerCase() === "bag")).toEqual(["BAG"]);
+    expect(choices.filter((unit) => unit.toLowerCase() === "tub")).toHaveLength(1);
+    expect(resolveVocabValue(choices, " bag ")).toBe("BAG");
+  });
+
+  it("resolves a new-unit draft to existing spelling without changing the draft or inventory", () => {
+    const doc = makeDoc({ items: [makeItem({ unit: "TuB", quantity: 4 })] });
+    const before = structuredClone(doc);
+    const draft = "  tUb  ";
+    expect(resolveVocabValue(creationUnitOptions(doc), draft)).toBe("TuB");
+    expect(resolveVocabValue(creationUnitOptions(doc), " punnet ")).toBe("punnet");
+    expect(draft).toBe("  tUb  ");
+    expect(doc).toEqual(before);
+  });
+
+  it("keeps already-used each/ea selectable without rewriting any saved unit or count", () => {
+    const doc = makeDoc({ items: [makeItem({ unit: "each", quantity: 4 }), makeItem({ unit: "ea", quantity: 2 })] });
+    const before = structuredClone(doc);
+    expect(creationUnitOptions(doc)).toEqual(expect.arrayContaining(["count", "each", "ea"]));
+    expect(doc).toEqual(before);
   });
 });
 
