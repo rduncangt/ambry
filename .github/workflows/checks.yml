@@ -1,0 +1,39 @@
+name: Validate changes
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history identifies only commits not already in main/PR base.
+      # PR tests run on GitHub's prospective merge checkout, not just its head.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check Git validation script
+        run: node --test scripts/check-git.test.mjs
+      - name: Check new commits, whitespace and exports
+        run: node scripts/check-git.mjs
+      - run: npm ci
+      - name: Run inventory and storage tests
+        run: npm test
+      - name: Prepare app files for publishing
+        run: npm run build
