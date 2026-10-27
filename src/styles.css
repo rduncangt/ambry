@@ -32,10 +32,6 @@
   --radius: 10px;
   --tap: 44px;            /* minimum tap target */
   --tabbar-h: 56px;
-  /* Inventory search bar: tap target + its vertical padding + hairline.
-     Shared token so .inv-view's scroll clearance can never disagree with
-     the bar's real height. */
-  --searchbar-h: calc(var(--tap) + var(--s2) * 2 + 1px);
 }
 
 /* -- reset / base ---------------------------------------------------------- */
