@@ -1,11 +1,11 @@
 /**
  * InventoryView — the aisle answer (PLAN.md §4 M1, flow (a): pocket to
  * answer < 3 s). The answer lives IN the row: name + QtyControl, never one
- * tap deeper. Search is pinned to the bottom (thumb zone, directly above the
- * tab bar) and is NOT auto-focused (PLAN.md §5 — the keyboard jumping up on
+ * tap deeper. Search stays with its results in a compact top sticky group
+ * and is NOT auto-focused (PLAN.md §5 — the keyboard jumping up on
  * every launch is friction).
  *
- * Three states, all under one sticky screen header and the same search bar:
+ * Three states, all under one heading and the same persistent search field:
  *   1. Default — one tappable card per location. A seeded catalog is mostly
  *      uncounted "–" rows; a flat list buries the handful of real counts, so
  *      the directory replaces it. (An earlier "Low & flagged" strip above
@@ -23,7 +23,7 @@
  * All of this is component state on purpose: tab switches may reset it
  * (PLAN.md §5 — no launch-state memory).
  */
-import { useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
@@ -122,21 +122,7 @@ export function InventoryView() {
   const nav = useNav();
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const view = useRef<HTMLElement>(null);
-  const searchbar = useRef<HTMLDivElement>(null);
   const [organizing, setOrganizing] = useState(false);
-  useLayoutEffect(() => {
-    const section = view.current;
-    const bar = searchbar.current;
-    if (section === null || bar === null) return;
-    // Match the actual dock, including Create, text sizing and safe-area
-    // padding. This changes clearance only; it never moves focus or scroll.
-    const measure = () => section.style.setProperty("--searchbar-h", `${Math.ceil(bar.getBoundingClientRect().height)}px`);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(bar);
-    return () => observer.disconnect();
-  }, []);
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
    *  `string | null` could not also mean "nothing open". `uncountedIds` and
@@ -218,11 +204,10 @@ export function InventoryView() {
   };
 
   return (
-    <section ref={view} class="view inv-view">
-      {/* Opaque sticky screen header: rows visibly disappear under it
-          instead of mingling with the status bar (body::after mask stays as
-          belt-and-braces). */}
-      <header class="sticky-head">
+    <section class="view inv-view">
+      {/* The heading can scroll away, leaving room for results above the
+          keyboard. Other screens retain their existing sticky headers. */}
+      <header class="inv-head">
         {openLive !== null && open !== null ? (
           <>
             {/* "‹ Locations", not "‹ Pantry": directly above a location
@@ -244,37 +229,9 @@ export function InventoryView() {
         <button class="btn inv-organize" type="button" onClick={() => setOrganizing(true)}>Organize items</button>
       </header>
 
-      {organizing && <OrganizeSheet
-        initialLocation={searching ? undefined : open?.location}
-        initialQuery={query}
-        onClose={() => setOrganizing(false)}
-      />}
-
-      {searching ? (
-        <SearchResults
-          results={results}
-          candidates={candidates}
-          nowIso={nowIso}
-        />
-      ) : openSplit !== null ? (
-        <>
-          <LocationItems
-            split={openSplit}
-            showUncounted={showUncounted}
-            onToggleUncounted={() => setShowUncounted(!showUncounted)}
-          />
-          {removableLocation !== null && (
-            <button class="loc-remove" type="button" onClick={removeOpenLocation}>
-              Remove this location
-            </button>
-          )}
-        </>
-      ) : (
-        <PantryHome onOpen={openLocation} />
-      )}
-
-      {/* Bottom-pinned search with an explicit clear button on every browser. */}
-      <div ref={searchbar} class="inv-searchbar">
+      {/* One always-mounted field: only this compact group sticks while
+          heading and results share ordinary document flow. */}
+      <div class="inv-searchbar">
         <div class="inv-search-field">
           <input
             ref={searchInput}
@@ -317,6 +274,35 @@ export function InventoryView() {
           </button>
         )}
       </div>
+
+      {organizing && <OrganizeSheet
+        initialLocation={searching ? undefined : open?.location}
+        initialQuery={query}
+        onClose={() => setOrganizing(false)}
+      />}
+
+      {searching ? (
+        <SearchResults
+          results={results}
+          candidates={candidates}
+          nowIso={nowIso}
+        />
+      ) : openSplit !== null ? (
+        <>
+          <LocationItems
+            split={openSplit}
+            showUncounted={showUncounted}
+            onToggleUncounted={() => setShowUncounted(!showUncounted)}
+          />
+          {removableLocation !== null && (
+            <button class="loc-remove" type="button" onClick={removeOpenLocation}>
+              Remove this location
+            </button>
+          )}
+        </>
+      ) : (
+        <PantryHome onOpen={openLocation} />
+      )}
     </section>
   );
 }
@@ -343,7 +329,7 @@ function PantryHome(props: { onOpen: (location: string | null) => void }) {
   return (
     <div>
       {summaries.length === 0 ? (
-        <p class="muted">Nothing here yet — type a name below to add your first item.</p>
+        <p class="muted">Type a name in the search field to add your first item.</p>
       ) : (
         <ul class="loc-cards">
           {summaries.map((s) => (
@@ -442,12 +428,15 @@ function LocationItems(props: {
 }
 
 /** Non-empty query: flat ranked results, then duplicate candidates (incl.
- *  tombstones-with-restore). Create lives in the search dock. */
+ *  tombstones-with-restore). Create stays with the search field above them. */
 function SearchResults(props: {
   results: Item[];
   candidates: Item[];
   nowIso: string;
 }) {
+  if (props.results.length === 0 && props.candidates.length === 0) {
+    return <p class="inv-search-empty" role="status">No matching items.</p>;
+  }
   return (
     <ul class="inv-list">
       {props.results.map((item) => (

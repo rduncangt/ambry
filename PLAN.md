@@ -171,10 +171,11 @@ history, and leaves a colliding tombstone. The fix is one named v1 feature, abou
 work, blessed by your own Scale section:
 
 - **Creation IS search.** The add flow is the search flow; "Create '⟨typed⟩'" is the
-  secondary action directly below the search field in the fixed bottom search area
-  (revised 2026-10-26); its position does not depend on match count. Matching is
-  normalized (case-fold, strip punctuation,
-  sort tokens, naive plurals) over names + aliases **including soft-deleted items** —
+  secondary action directly below the search field in a compact group above the
+  results (revised 2026-10-26 after the failed iPhone bottom-layout retest). The
+  group sticks below the top safe area; the heading can scroll away. Results or
+  the empty-result message follow immediately, without a bottom-control gap.
+  Matching is normalized (case-fold, strip punctuation, sort tokens, naive plurals) over names + aliases **including soft-deleted items** —
   tapping a live match opens it, tapping a tombstone *restores* it (same UUID, history
   intact). "Create new anyway" stays one tap, so no friction is added when there's no match.
 
@@ -608,12 +609,13 @@ doesn't pass, nothing else gets built.**
 
 ### M1 — The aisle answer + backup (the genuinely minimal usable milestone; ~a weekend of evenings)
 
-- Bottom-pinned live search (thumb zone), answer **in the result row** — name, ladder
+- Top-grouped sticky live search, answer **in the result row** — name, ladder
   chip or qty+unit, location; never one tap deeper. Case/diacritic-folded substring over
   names + aliases, prefix-ranked. No fuzzy.
 - **Search-first create** (§1.4): matches incl. tombstones-with-restore; "Create
-  '⟨typed⟩'" directly below the fixed search field. Quick-create requires name only,
-  defaults to quantity 1, offers full existing/custom unit and optional package
+  '⟨typed⟩'" directly below the search field, immediately above results. Quick-create
+  requires name only, defaults to quantity 1, offers full existing/custom unit
+  and optional package
   selection, and preserves the open location as its default.
 - Quantity gestures writing in place: ±steppers, tap-number → `inputmode="decimal"`,
   ladder chips. Event logging via the chokepoint (free forever after). Soft delete with

@@ -1,29 +1,27 @@
-/* InventoryView-specific rules. Everything reusable (rows, markers, qty)
-   comes from styles.css; this file only pins the search bar and shapes the
-   rows' view-local affordances. */
-
-/* Last row must scroll clear of the fixed search bar (--searchbar-h, the
-   shared token in styles.css), on top of .content's own tab-bar clearance. */
-.inv-view {
-  padding-bottom: calc(var(--searchbar-h) + var(--s3));
+/* Inventory-only heading and search layout. The heading scrolls away;
+   search and its results remain together in ordinary document flow. */
+.inv-head {
+  margin: calc(-1 * var(--s4)) calc(-1 * var(--s4)) 0;
+  padding: var(--s3) var(--s4) var(--s2);
 }
+.inv-head .view-title { margin-bottom: 0; }
+.inv-head .back-btn { display: block; margin: calc(-1 * var(--s2)) 0; }
 
-/* Thumb-zone search: fixed directly above the tab bar. z-index sits below the
-   item overlay (40) and sheet (50) so detail screens cover it, above content. */
+/* Only the compact controls stick, below the safe area and above result
+   rows. The app frame owns horizontal safe-area and bottom tab clearance. */
 .inv-searchbar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
-  z-index: 20;
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 25;
   background: var(--bg);
-  border-top: 1px solid var(--line);
-  padding: var(--s2) calc(var(--s4) + env(safe-area-inset-right)) var(--s2)
-    calc(var(--s4) + env(safe-area-inset-left));
+  border-bottom: 1px solid var(--line);
+  margin: 0 calc(-1 * var(--s4));
+  padding: var(--s2) var(--s4);
   display: flex;
   flex-direction: column;
   gap: var(--s1);
 }
+.inv-search-empty { padding-top: var(--s2); }
 .inv-search-field {
   position: relative;
 }
