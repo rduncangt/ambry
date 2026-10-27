@@ -20,6 +20,9 @@
   border-top: 1px solid var(--line);
   padding: var(--s2) calc(var(--s4) + env(safe-area-inset-right)) var(--s2)
     calc(var(--s4) + env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
 }
 .inv-search-field {
   position: relative;
@@ -175,8 +178,23 @@
   display: block;
 }
 
-.inv-create {
+.inv-create-action {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 0 var(--s3);
+  background: none;
+  border: none;
+  text-align: left;
   color: var(--accent);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.inv-create-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .inv-deleted {
   color: var(--muted);
@@ -213,7 +231,7 @@
   .inv-chevron { transition: none; }
 }
 
-/* The demoted create row: an exact match sits above it, so it whispers —
+/* The secondary create action: an exact match is in the results, so it whispers —
    still one tap, never a dead end. */
 .inv-create-anyway {
   color: var(--muted);

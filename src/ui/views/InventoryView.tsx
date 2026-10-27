@@ -16,15 +16,14 @@
  *      collapsed behind a "not counted yet" divider.
  *   3. Searching — flat ranked results across ALL items regardless of open
  *      location; clearing the query drops back to whichever state was
- *      underneath. Creation IS search (PLAN.md §1.4): when the query matches
- *      nothing exactly, the list ends with a Create row; above it, duplicate
- *      candidates — including tombstones, whose Restore keeps the UUID and
- *      history intact.
+ *      underneath. Creation IS search (PLAN.md §1.4): Create stays beside the
+ *      search field; the results include duplicate candidates and tombstones,
+ *      whose Restore keeps the UUID and history intact.
  *
  * All of this is component state on purpose: tab switches may reset it
  * (PLAN.md §5 — no launch-state memory).
  */
-import { useRef, useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { fmtAge } from "../../domain/format";
 import { fold, normalKey } from "../../domain/normalize";
 import { duplicateCandidates, searchItems } from "../../domain/search";
@@ -120,9 +119,24 @@ function splitByVisit(
 export function InventoryView() {
   const doc = useDoc();
   const store = useStore();
+  const nav = useNav();
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
+  const view = useRef<HTMLElement>(null);
+  const searchbar = useRef<HTMLDivElement>(null);
   const [organizing, setOrganizing] = useState(false);
+  useLayoutEffect(() => {
+    const section = view.current;
+    const bar = searchbar.current;
+    if (section === null || bar === null) return;
+    // Match the actual dock, including Create, text sizing and safe-area
+    // padding. This changes clearance only; it never moves focus or scroll.
+    const measure = () => section.style.setProperty("--searchbar-h", `${Math.ceil(bar.getBoundingClientRect().height)}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
   /** Which shelf is open. Outer null = the card directory; the wrapper
    *  exists because the "elsewhere" bucket IS the null location, so a bare
    *  `string | null` could not also mean "nothing open". `uncountedIds` and
@@ -142,6 +156,20 @@ export function InventoryView() {
   // fold("") === fold("  ,,") === "" — a query that folds to nothing keeps
   // the underlying state (searchItems would return [] for it anyway).
   const searching = fold(query) !== "";
+  const trimmed = query.trim();
+  const results = searchItems(doc.items, query);
+  const resultIds = new Set(results.map((item) => item.id));
+  // Keep the existing visible-exact-match rule: Create remains available but
+  // secondary. Equivalent names absent from substring results still surface
+  // as duplicate candidates, including tombstones that can be restored.
+  const key = normalKey(query);
+  const exactVisible = doc.items.some((item) =>
+    item.deleted_at === null && resultIds.has(item.id) &&
+    [item.name, ...item.aliases].some((label) => normalKey(label) === key),
+  );
+  const candidates = !searching || exactVisible ? [] : duplicateCandidates(doc.items, query)
+    .filter((item) => !resultIds.has(item.id));
+  const createLabel = exactVisible ? `Create “${trimmed}” anyway` : `Create “${trimmed}”`;
 
   const openLocation = (location: string | null): void => {
     const split = itemsInLocation(doc, location);
@@ -190,7 +218,7 @@ export function InventoryView() {
   };
 
   return (
-    <section class="view inv-view">
+    <section ref={view} class="view inv-view">
       {/* Opaque sticky screen header: rows visibly disappear under it
           instead of mingling with the status bar (body::after mask stays as
           belt-and-braces). */}
@@ -224,14 +252,9 @@ export function InventoryView() {
 
       {searching ? (
         <SearchResults
-          query={query}
+          results={results}
+          candidates={candidates}
           nowIso={nowIso}
-          openLocation={open}
-          // Success-only (CreateDefaults.onCreated): once the item exists,
-          // the search holding its name is a stale invitation to duplicate
-          // it — clearing drops back to whichever state was beneath (cards
-          // or the open shelf, where the new item now lives).
-          onCreated={() => setQuery("")}
         />
       ) : openSplit !== null ? (
         <>
@@ -251,7 +274,7 @@ export function InventoryView() {
       )}
 
       {/* Bottom-pinned search with an explicit clear button on every browser. */}
-      <div class="inv-searchbar">
+      <div ref={searchbar} class="inv-searchbar">
         <div class="inv-search-field">
           <input
             ref={searchInput}
@@ -281,6 +304,18 @@ export function InventoryView() {
             </button>
           )}
         </div>
+        {searching && (
+          <button class={`inv-create-action${exactVisible ? " inv-create-anyway" : ""}`} type="button"
+            aria-label={createLabel} title={createLabel}
+            onClick={() => nav.openCreate(trimmed, {
+              // Only a successful save retires the query. Cancel keeps the
+              // results and the shelf context from which search was opened.
+              onCreated: () => setQuery(""),
+              ...(open !== null ? { location: open.location } : {}),
+            })}>
+            {createLabel}
+          </button>
+        )}
       </div>
     </section>
   );
@@ -407,59 +442,22 @@ function LocationItems(props: {
 }
 
 /** Non-empty query: flat ranked results, then duplicate candidates (incl.
- *  tombstones-with-restore), then the Create fallback row. */
+ *  tombstones-with-restore). Create lives in the search dock. */
 function SearchResults(props: {
-  query: string;
+  results: Item[];
+  candidates: Item[];
   nowIso: string;
-  /** The location open under the search interlude (its wrapper shape), so
-   *  Create files the new item where the user is standing. */
-  openLocation: { location: string | null } | null;
-  /** Ridden into openCreate's defaults: runs only after a successful create
-   *  (the owner clears the search query there). */
-  onCreated: () => void;
 }) {
-  const doc = useDoc();
-  const nav = useNav();
-  const trimmed = props.query.trim();
-
-  const results = searchItems(doc.items, props.query);
-  const resultIds = new Set(results.map((i) => i.id));
-
-  // "Matches something exactly" uses the §1.4 normalization (case,
-  // punctuation, token order, naive plurals) over live names + aliases — a
-  // VISIBLE exact match means "tap it", so Create and the candidate section
-  // disappear. Visibility matters: search itself is substring-only, so a
-  // reordered/pluralized exact equivalent ("canned tomatoes" for "Tomatoes,
-  // canned") may match by key while the results are empty — suppressing
-  // Create AND the candidates then would dead-end on a blank list for an
-  // item that exists. Letting duplicateCandidates surface it gives the user
-  // the row to tap instead.
-  const key = normalKey(props.query);
-  const exactVisible = doc.items.some(
-    (i) =>
-      i.deleted_at === null &&
-      resultIds.has(i.id) &&
-      [i.name, ...i.aliases].some((label) => normalKey(label) === key),
-  );
-
-  const candidates = exactVisible
-    ? []
-    : duplicateCandidates(doc.items, props.query).filter(
-        // Live candidates the substring search already listed stay listed
-        // once (merge-loser tombstones are already excluded by the domain).
-        (i) => !resultIds.has(i.id),
-      );
-
   return (
     <ul class="inv-list">
-      {results.map((item) => (
+      {props.results.map((item) => (
         <ItemRow
           key={item.id}
           item={item}
           caption={caption(item.category, item.location)}
         />
       ))}
-      {candidates.map((item) =>
+      {props.candidates.map((item) =>
         item.deleted_at === null ? (
           <ItemRow
             key={item.id}
@@ -470,32 +468,6 @@ function SearchResults(props: {
           <RestoreRow key={item.id} item={item} nowIso={props.nowIso} />
         ),
       )}
-      {/* PLAN.md §1.4: "create new anyway remains a one-tap secondary
-          action". Suppressing this row entirely when an exact match shows
-          dead-ended the legitimate near-name ("black bean" while typing
-          toward "Black beans, dry"): the user saw only the existing item
-          and no way to add. Demote, never remove. */}
-      <li class="row">
-        <button
-          class="row-main inv-open"
-          type="button"
-          onClick={() =>
-            // Standing in an open shelf, the new item files there (PLAN.md
-            // M1 quick-create: location preselected); either way onCreated
-            // clears this search once the item actually exists.
-            nav.openCreate(trimmed, {
-              onCreated: props.onCreated,
-              ...(props.openLocation !== null
-                ? { location: props.openLocation.location }
-                : {}),
-            })
-          }
-        >
-          <span class={`row-title inv-create${exactVisible ? " inv-create-anyway" : ""}`}>
-            {exactVisible ? `Create “${trimmed}” anyway` : `Create “${trimmed}”`}
-          </span>
-        </button>
-      </li>
     </ul>
   );
 }
