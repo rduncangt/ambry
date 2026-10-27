@@ -14,11 +14,14 @@ permissions:
 # Never let two deploys race; the origin is the database key, so a half-applied
 # deploy is worse than a slightly stale one.
 concurrency:
-  group: pages
+  # A skipped manual branch run must not cancel a main deployment.
+  group: ${{ github.ref == 'refs/heads/main' && 'pages' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   build:
+    # Manual runs on feature branches must never publish their checkout.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +30,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      # The domain layer guards the data; a red test must not reach the phone.
+      # Inventory and storage tests guard the data before publishing.
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
@@ -35,6 +38,7 @@ jobs:
           path: dist
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     environment:
