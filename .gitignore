@@ -7,7 +7,8 @@ dist/
 first_items.md
 
 # real exports from the app must never be committed (personal data)
-ambry-backup-*.json
+[Aa][Mm][Bb][Rr][Yy]-[Bb][Aa][Cc][Kk][Uu][Pp]-*.[Jj][Ss][Oo][Nn]
+[Aa][Mm][Bb][Rr][Yy]-[Ii][Nn][Vv][Ee][Nn][Tt][Oo][Rr][Yy]*.[Jj][Ss][Oo][Nn]
 
 # screenshots dropped into the repo for review sessions
 [Ss]creenshot*
