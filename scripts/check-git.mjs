@@ -23,7 +23,7 @@ export function messageErrors(message, generatedMerge = false) {
   const [subject = "", separator, ...body] = message.trimEnd().split(/\r?\n/);
   const errors = [];
   if (!subject || length(subject) > 50) errors.push("subject must contain 1–50 characters");
-  if (!verbs.has(subject.split(" ")[0])) errors.push("start with a documented imperative verb (see AGENTS.md)");
+  if (!verbs.has(subject.split(" ")[0])) errors.push(`start with an accepted imperative verb: ${[...verbs].join(", ")}`);
   if (separator !== undefined && separator !== "") errors.push("separate subject and body with a blank line");
   if (body.some(line => length(line) > 72)) errors.push("wrap body lines to 72 characters");
   return errors;
