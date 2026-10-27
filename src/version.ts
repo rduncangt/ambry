@@ -5,4 +5,4 @@
  * Release-per-round versioning: bump the minor for a feature round, the
  * patch for a pure fix round. Nothing else reads this; keep it that way.
  */
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "1.0.1";
