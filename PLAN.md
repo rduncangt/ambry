@@ -47,6 +47,35 @@ The app can move directly from 0.11.x to 1.0.0 once acceptance is complete. The 
 version and `schema_version` are separate: a release number alone never requires a
 data migration or changes to the user's saved inventory.
 
+### v1 acceptance decision (2026-10-26)
+
+PM, dev and independent UX review accept the existing app for the personal-use
+1.0.0 release. No confirmed unresolved defect remains from the reviewed flows.
+This is a release-number change, with no inventory schema migration.
+
+- All 682 inventory and storage tests passed on the accepted 0.12.5 code;
+  app-file preparation and independent browser checks passed.
+- The user confirmed actual installed-iPhone editing, ordinary updates preserving
+  inventory, same-file replacement and readable restore preview, full-close
+  offline reopening, Close with the keyboard open, and child-dialog Close/Back.
+- A controlled pending save survived an actual browser update restart exactly
+  once. Injected save failure and conflict blocked restart; retry after the save
+  failure succeeded. These were real worker transitions with controlled test
+  conditions, not claims of real device storage exhaustion.
+- Restore acceptance combines the historical completed iPhone recovery drill,
+  recent completed desktop restore, unchanged restore/storage code since that
+  desktop check, and current iPhone file replacement/readable preview. A complete
+  restore was not repeated on the current iPhone release; reassess after changes
+  to storage or the file format.
+- VoiceOver remains untested and is an explicit accessibility follow-up, not a
+  claimed pass or certification. PM accepts that limit for this personal-use
+  release; the keyboard microphone is dictation, not VoiceOver evidence.
+
+The earlier iPhone cursor report is no longer reproducible in normal use. Its
+cause remains unknown; no specific app fix or phone cause is claimed. Temporary
+diagnostic code and its visible entry were removed in 0.12.5. Optional feature
+ideas remain deferred and do not expand the release scope.
+
 ---
 
 ## 1. Where I disagree with the brief
