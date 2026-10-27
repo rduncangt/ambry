@@ -171,7 +171,9 @@ history, and leaves a colliding tombstone. The fix is one named v1 feature, abou
 work, blessed by your own Scale section:
 
 - **Creation IS search.** The add flow is the search flow; "Create '⟨typed⟩'" is the
-  fallback row beneath the matches. Matching is normalized (case-fold, strip punctuation,
+  secondary action directly below the search field in the fixed bottom search area
+  (revised 2026-10-26); its position does not depend on match count. Matching is
+  normalized (case-fold, strip punctuation,
   sort tokens, naive plurals) over names + aliases **including soft-deleted items** —
   tapping a live match opens it, tapping a tombstone *restores* it (same UUID, history
   intact). "Create new anyway" stays one tap, so no friction is added when there's no match.
@@ -610,8 +612,9 @@ doesn't pass, nothing else gets built.**
   chip or qty+unit, location; never one tap deeper. Case/diacritic-folded substring over
   names + aliases, prefix-ranked. No fuzzy.
 - **Search-first create** (§1.4): matches incl. tombstones-with-restore; "Create
-  '⟨typed⟩'" as the fallback row. Quick-create asks name only — unit chip row, qty 1,
-  last-used location preselected; everything else is edit-later.
+  '⟨typed⟩'" directly below the fixed search field. Quick-create requires name only,
+  defaults to quantity 1, offers full existing/custom unit and optional package
+  selection, and preserves the open location as its default.
 - Quantity gestures writing in place: ±steppers, tap-number → `inputmode="decimal"`,
   ladder chips. Event logging via the chokepoint (free forever after). Soft delete with
   undo toast.
