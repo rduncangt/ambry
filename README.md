@@ -1,25 +1,28 @@
 # Ambry
 
-A pantry inventory and shopping list for your phone. Keep track of what you
-have, find what needs buying, and add purchases to your pantry when you check out.
+A pantry inventory and shopping list for Android and iPhone. Keep track of what
+you have, find what needs buying, and add purchases to your pantry when you check
+out.
 
 **[Open Ambry](https://ambry.sciomedes.com)**
 
 No accounts or automatic sync. Your pantry stays in the browser or installed
 app on your device. Once loaded, Ambry can be used offline.
 
-## Start on iPhone
+## Get started
 
-1. Open [Ambry](https://ambry.sciomedes.com) in Safari.
-2. Use **Share → Add to Home Screen**. Enable **Open as Web App** if offered,
-   then tap **Add**. Depending on Safari's layout, Share is inside the page menu.
-   [Apple's instructions](https://support.apple.com/guide/iphone/iph42ab2f3a7/ios)
-   show the available layouts.
-3. Launch the Ambry icon from your Home Screen before entering your pantry.
-   Safari and the installed app can have separate stored data.
-4. Choose **Start empty**, or **Start with the starter pantry** for common items
+1. Open [Ambry](https://ambry.sciomedes.com) in your phone's browser. Installation
+   is optional.
+2. To add Ambry to your home screen, look in your browser's menu or share controls
+   for **Install** or **Add to Home Screen**, if available. Follow the prompts,
+   then open the Ambry icon before entering your pantry. Options vary by device
+   and browser.
+3. Choose **Start empty**, or **Start with the starter pantry** for common items
    you can count as you go. If you already have an inventory file, choose
    **Restore backup** instead.
+
+Different browsers and installed apps may keep separate pantry data. Return
+through the same browser or app each time.
 
 ## Find and add items
 
@@ -59,13 +62,15 @@ In **More**, choose **Save inventory file** the first time, then
 **Update inventory file** for later copies. The regular filename is
 `ambry-inventory.json`; it includes your pantry, shopping list and history.
 
-On iPhone, choose **Save to Files**, use the same folder, then **Replace** when
-asked. Some browsers download another copy instead; move it over the old file.
+Depending on your device and browser, Ambry opens a save or share dialog, or
+starts a download. Choose a destination folder when offered. For updates, use
+the same folder and replace the old file. If a download creates another copy,
+move it to your chosen folder and replace the previous `ambry-inventory.json`.
 For an optional dated backup, use **Keep a separate copy → Save a dated copy**.
 
 Edits save on your device; they do not automatically update this external file.
 Browser storage can be cleared, so keep a file outside the app for recovery.
-Saving it in iCloud Drive does not turn on automatic pantry sync.
+Saving it in a cloud folder does not turn on automatic pantry sync.
 
 To recover, choose **Restore backup** on the starting screen, or
 **More → Restore from a file…** in an existing pantry. Review the preview before
